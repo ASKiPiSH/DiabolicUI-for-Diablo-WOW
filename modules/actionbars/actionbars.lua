@@ -1,429 +1,501 @@
+--[[
+	DiabolicUI ActionBars host module (Diablo-WoW edition)
+
+	The action buttons, paging, keybinds, pet/stance/bag bars and the micro menu
+	are provided by the embedded DiabolicBars (Bartender4 4.4.2, see \bartender).
+	This module only keeps what DiabolicUI is famous for:
+	  * the bottom artwork (demon, angel, skull) sized for 1/2/3 bottom rows
+	  * the anchor frames ("Controller: Main/Side/Pet/Stance") that the orbs,
+	    quest tracker, totem bar etc. are positioned by
+	  * a default Diablo-style layout for the bars (applied once, or on demand)
+	  * the DiabolicUI button border skin (see skin.lua)
+]]
+
 local _, Engine = ...
 local L = Engine:GetLocale()
 
--- This module requires a "HIGH" priority, 
--- as other modules like the questtracker and the unitframes
--- hook themselves into its frames!
+-- HIGH priority: unitframes, tracker etc. fetch our anchor frames in their OnInit
 local Module = Engine:NewModule("ActionBars", "HIGH")
-Module.Template = {} -- table to hold templates for buttons and bars
-
 
 -- Lua API
-local ipairs, select, unpack = ipairs, select, unpack
-local tonumber = tonumber
-local tinsert = table.insert
+local pairs, ipairs, unpack, tonumber, tostring = pairs, ipairs, unpack, tonumber, tostring
+local math_max, math_min, math_floor = math.max, math.min, math.floor
 
 -- WoW API
 local CreateFrame = CreateFrame
-local GetAccountExpansionLevel = GetAccountExpansionLevel
-local GetScreenWidth = GetScreenWidth
-local GetTimeToWellRested = GetTimeToWellRested
-local GetXPExhaustion = GetXPExhaustion
+local InCombatLockdown = InCombatLockdown
 local IsXPUserDisabled = IsXPUserDisabled
-local IsPossessBarVisible = IsPossessBarVisible
-local UnitAffectingCombat = UnitAffectingCombat
-local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitLevel = UnitLevel
-local UnitXP = UnitXP
-local UnitXPMax = UnitXPMax
-local GameTooltip = GameTooltip
+local GetAccountExpansionLevel = GetAccountExpansionLevel
 local MAX_PLAYER_LEVEL_TABLE = MAX_PLAYER_LEVEL_TABLE
 
-local BLANK_TEXTURE = [[Interface\ChatFrame\ChatFrameBackground]]
+-- Version of the default layout. Bump it to push a new default layout to everybody once.
+local LAYOUT_VERSION = 1
 
--- whether or not the XP bar is enabled
+-- Bartender bar ids that make up the bottom rows, bottom-most first:
+-- 1 = main bar, 6 = Blizzard "bottom left", 5 = Blizzard "bottom right"
+local BOTTOM_ROW_BARS = { 1, 6, 5 }
+
+-- pixel size of a button in the 1/2/3 row modes (identical to the old DiabolicUI bars)
+local BUTTON_PX = { 50, 44, 36 }
+local BUTTON_PADDING_PX = 4
+local BAR_INSET = 10 -- distance from screen bottom to the lowest row
+
+-- Bartender ButtonBar geometry (see bartender\ButtonBar.lua UpdateButtonLayout)
+local BT_BUTTON = 36
+local BT_MARGIN_BOTTOM = 7 -- bar frame bottom -> lowest button bottom (growVertical DOWN, 1 row)
+local BT_MARGIN_TOP = 3
+local BT_MARGIN_LEFT = 5
+
+local function clamp(n, lo, hi) return math_max(lo, math_min(hi, n)) end
+
+-- 3.3.5 has no Region:SetShown()
+local function SetShown(region, show)
+	if show then region:Show() else region:Hide() end
+end
+
+-------------------------------------------------------------------------------
+-- Anchor widgets (kept for compatibility with the rest of DiabolicUI)
+-------------------------------------------------------------------------------
+local function NewAnchorWidget(name)
+	local widget = Module:SetWidget(name)
+	widget.GetFrame = function(self) return self.frame end
+	return widget
+end
+NewAnchorWidget("Controller: Main")
+NewAnchorWidget("Controller: Side")
+NewAnchorWidget("Controller: Pet")
+NewAnchorWidget("Controller: Stance")
+
+Module.GetNumBottomRows = function(self)
+	return clamp(tonumber(self.db and self.db.num_bars) or 1, 1, 3)
+end
+
+-- whether or not the XP bar is shown (not at max level, xp not disabled)
 Module.IsXPEnabled = function(self)
-	if IsXPUserDisabled() 
-	or UnitLevel("player") == (MAX_PLAYER_LEVEL_TABLE[GetAccountExpansionLevel() or #MAX_PLAYER_LEVEL_TABLE] or MAX_PLAYER_LEVEL_TABLE[#MAX_PLAYER_LEVEL_TABLE]) then
+	local max = MAX_PLAYER_LEVEL_TABLE[GetAccountExpansionLevel() or #MAX_PLAYER_LEVEL_TABLE] or MAX_PLAYER_LEVEL_TABLE[#MAX_PLAYER_LEVEL_TABLE]
+	if IsXPUserDisabled() or UnitLevel("player") == max then
 		return
 	end
 	return true
 end
 
-Module.ApplySettings = Module:Wrap(function(self)
-	local db = self.db
-	local Main = self:GetWidget("Controller: Main"):GetFrame()
-	local Side = self:GetWidget("Controller: Side"):GetFrame()
-	
-	-- Tell the secure environment about the number of visible bars
-	-- This will also fire off an artwork update and sizing of bars and buttons!
-	Main:SetAttribute("numbars", db.num_bars)
-	Side:SetAttribute("numbars", db.num_side_bars)
-	
---	self:UpdateArtwork() -- not needed
-end)
+Module.CreateAnchors = function(self)
+	local config = self.config.structure.controllers
+	local UICenter = Engine:GetFrame()
+	local mode = tostring(self:GetNumBottomRows())
 
+	-- Main: covers the bottom button rows. Not secure on purpose:
+	-- nothing secure is parented to it, it's only used as an anchor.
+	local Main = CreateFrame("Frame", "DiabolicUIMainBarAnchor", UICenter)
+	Main:SetFrameStrata("BACKGROUND")
+	Main:SetSize(unpack(config.main.size[mode]))
+	Main:SetPoint("BOTTOM", UICenter, "BOTTOM", 0, BAR_INSET)
+	Main:SetAttribute("numbars", tonumber(mode)) -- read by the XP bar widget
+	self:GetWidget("Controller: Main").frame = Main
+
+	-- Side: right screen edge, where the two vertical bars live
+	local Side = CreateFrame("Frame", "DiabolicUISideBarAnchor", UICenter)
+	Side:SetSize(unpack(config.side.size["2"]))
+	Side:SetPoint("RIGHT", UICenter, "RIGHT", 0, 0)
+	Side:SetPoint("TOP", UICenter, "TOP", 0, -326)
+	self:GetWidget("Controller: Side").frame = Side
+
+	-- Pet: left of the side bars
+	local Pet = CreateFrame("Frame", "DiabolicUIPetBarAnchor", UICenter)
+	Pet:SetSize(unpack(config.pet.size))
+	Pet:SetPoint("RIGHT", Side, "LEFT", 0, 0)
+	self:GetWidget("Controller: Pet").frame = Pet
+
+	-- Stance: above the bottom rows
+	local Stance = CreateFrame("Frame", "DiabolicUIStanceBarAnchor", UICenter)
+	Stance:SetSize(unpack(config.stance.size))
+	Stance:SetPoint("BOTTOM", Main, "TOP", 0, 91)
+	self:GetWidget("Controller: Stance").frame = Stance
+end
+
+-------------------------------------------------------------------------------
+-- Artwork
+-------------------------------------------------------------------------------
 Module.LoadArtwork = function(self)
 	local config = self.config.visuals.artwork
-	local db = self.db
-	
 	local Main = self:GetWidget("Controller: Main"):GetFrame()
-	
-	self.artwork = {}
-	self.artwork_modes = { "1", "2", "3", "vehicle" }
-	
-	-- holder for the artwork behind the buttons and globes
+
 	local background = CreateFrame("Frame", nil, Main)
 	background:SetFrameStrata("BACKGROUND")
-	background:SetFrameLevel(10) -- room for the xp/rep bar
+	background:SetFrameLevel(10) -- room for the xp bar below
 	background:SetAllPoints()
-	
-	-- artwork overlaying the globes (demon and angel)
+
 	local overlay = CreateFrame("Frame", nil, Main)
 	overlay:SetFrameStrata("MEDIUM")
-	overlay:SetFrameLevel(10) -- room for the player unit frame and actionbuttons
+	overlay:SetFrameLevel(10) -- above the orbs, below the buttons
 	overlay:SetAllPoints()
-	
-	local new = function(parent, config)
-		local artwork = parent:CreateTexture(nil, "ARTWORK")
-		artwork:Hide()
-		artwork:SetSize(unpack(config.size))
-		artwork:SetTexture(config.texture)
-		artwork:SetPoint(unpack(config.position))
-		return artwork
-	end
 
-	for _,i in ipairs(self.artwork_modes) do
+	self.artworkFrames = { background, overlay }
+	self.artwork = {}
+
+	local new = function(parent, cfg)
+		local t = parent:CreateTexture(nil, "ARTWORK")
+		t:Hide()
+		t:SetSize(unpack(cfg.size))
+		t:SetTexture(cfg.texture)
+		t:SetPoint(unpack(cfg.position))
+		return t
+	end
+	for _, i in ipairs({ "1", "2", "3" }) do
 		self.artwork["bar"..i] = new(background, config[i].center)
 		self.artwork["bar"..i.."left"] = new(overlay, config[i].left)
 		self.artwork["bar"..i.."right"] = new(overlay, config[i].right)
 		self.artwork["bar"..i.."skull"] = new(overlay, config[i].skull)
-
-		-- doesn't exist for vehicles
 		if config[i].centerxp then
 			self.artwork["bar"..i.."xp"] = new(background, config[i].centerxp)
 			self.artwork["bar"..i.."skullxp"] = new(overlay, config[i].skullxp)
 		end
 	end
-	
 end
-
 
 Module.UpdateArtwork = function(self)
-	local db = self.db
-	
-	-- we do a load on demand system here
-	-- that creates the artwork upon the first bar update
 	if not self.artwork then
-		self:LoadArtwork() -- load the artwork
+		self:LoadArtwork()
 	end
-	
-	-- figure out which backdrop texture to show
+	local shown = self.db.show_artwork ~= false
+	for _, f in ipairs(self.artworkFrames) do
+		if shown then f:Show() else f:Hide() end
+	end
+
+	local mode = tostring(self:GetNumBottomRows())
+	local xp = self:IsXPEnabled() or (ParagonXPBarFrame and ParagonXPBarFrame:IsShown())
+	for _, i in ipairs({ "1", "2", "3" }) do
+		local a = self.artwork
+		local active = (i == mode)
+		local useXP = active and xp and a["bar"..i.."xp"]
+		SetShown(a["bar"..i], active and not useXP)
+		SetShown(a["bar"..i.."skull"], active and not useXP)
+		if a["bar"..i.."xp"] then
+			SetShown(a["bar"..i.."xp"], useXP and true or false)
+			SetShown(a["bar"..i.."skullxp"], useXP and true or false)
+		end
+		SetShown(a["bar"..i.."left"], active)
+		SetShown(a["bar"..i.."right"], active)
+	end
+end
+
+-------------------------------------------------------------------------------
+-- Bottom rows mode (1, 2 or 3 rows)
+-------------------------------------------------------------------------------
+Module.SetNumBottomRows = function(self, num, applyLayout)
+	if InCombatLockdown() then
+		print("|cff8a0707Diabolic|r|cffffffffUI|r: нельзя менять раскладку панелей в бою.")
+		return
+	end
+	num = clamp(tonumber(num) or 1, 1, 3)
+	self.db.num_bars = num
 	local Main = self:GetWidget("Controller: Main"):GetFrame()
-	local state = tostring(Main:GetAttribute("state-page"))
-	local num_bars = tonumber(Main:GetAttribute("numbars"))
-
-	local artwork = self.artwork
-	local artwork_modes = self.artwork_modes
-
-	--local num_bars = db.num_bars
-	local has_xp_bar = self:IsXPEnabled()
-	--local has_possess_ui = IsPossessBarVisible()
-	--local has_vehicle_ui = UnitHasVehicleUI("player")
-	
-	--local mode
-	local mode
-	if state == "possess" or state == "vehicle" then
-		mode = "vehicle"
-	else
-		mode = tostring(num_bars)
+	Main:SetSize(unpack(self.config.structure.controllers.main.size[tostring(num)]))
+	Main:SetAttribute("numbars", num) -- XP bar widget listens to this
+	self:UpdateArtwork()
+	if applyLayout ~= false then
+		self:ApplyBottomRows()
 	end
-	--if has_possess_ui or has_vehicle_ui then
---		mode = "vehicle"
---	else
---		mode = tostring(num_bars)
---	end
-	
-	local action
-	for _,i in ipairs(self.artwork_modes) do
-		if i == mode then
-			if has_xp_bar and self.artwork["bar"..i.."xp"] then
-				self.artwork["bar"..i.."xp"]:Show()
-				self.artwork["bar"..i.."skullxp"]:Show()
-				self.artwork["bar"..i]:Hide()
-				self.artwork["bar"..i.."skull"]:Hide()
-			else
-				if self.artwork["bar"..i.."xp"] then
-					self.artwork["bar"..i.."xp"]:Hide()
-					self.artwork["bar"..i.."skullxp"]:Hide()
-				end
-				self.artwork["bar"..i]:Show()
-				self.artwork["bar"..i.."skull"]:Show()
-			end
-			self.artwork["bar"..i.."left"]:Show()
-			self.artwork["bar"..i.."right"]:Show()
+end
+
+-------------------------------------------------------------------------------
+-- DiabolicBars (Bartender) layout
+-------------------------------------------------------------------------------
+local function GetBT()
+	local BT = _G.DiabolicBars
+	if BT and BT.db then return BT end
+end
+
+-- LibWindow position: SetPoint(point, UIParent, point, x/scale, y/scale)
+-- so x and y are plain UIParent units.
+local function SetBarPosition(bar, point, x, y, scale)
+	local pos = bar.config.position
+	pos.point, pos.x, pos.y, pos.scale = point, x, y, scale
+	pos.growVertical, pos.growHorizontal = "DOWN", "RIGHT"
+end
+
+-- DisableBar() only touches bars that were created, make sure the setting sticks
+Module.DisableActionBar = function(self, AB, id)
+	AB.db.profile.actionbars[id].enabled = false
+	if AB.actionbars[id] then
+		AB:DisableBar(id)
+	end
+end
+
+local function ApplyBar(bar)
+	if not bar or bar.disabled then return end
+	bar:ApplyConfig()
+	if bar.UpdateButtonLayout then bar:UpdateButtonLayout() end
+end
+
+-- Places bars 1/6/5 as the bottom rows for the current mode, disables the rest of them
+Module.ApplyBottomRows = function(self)
+	local BT = GetBT()
+	if not BT or InCombatLockdown() then return end
+	local AB = BT:GetModule("ActionBars", true)
+	if not AB or not AB.actionbars then return end
+
+	local rows = self:GetNumBottomRows()
+	local px = BUTTON_PX[rows]
+	local scale = px / BT_BUTTON
+	local pad = BUTTON_PADDING_PX / scale
+
+	for row, id in ipairs(BOTTOM_ROW_BARS) do
+		if row <= rows then
+			AB:EnableBar(id)
+			local bar = AB.actionbars[id]
+			bar.config.rows = 1
+			bar.config.buttons = 12
+			bar.config.padding = pad
+			local y = BAR_INSET + (row - 1) * (px + BUTTON_PADDING_PX) - BT_MARGIN_BOTTOM * scale
+			SetBarPosition(bar, "BOTTOM", 0, y, scale)
+			ApplyBar(bar)
 		else
-			if self.artwork["bar"..i.."xp"] then
-				self.artwork["bar"..i.."xp"]:Hide()
-				self.artwork["bar"..i.."skullxp"]:Hide()
+			self:DisableActionBar(AB, id)
+		end
+	end
+	self:UpdateArtwork()
+	self:PositionStanceBar()
+end
+
+Module.PositionStanceBar = function(self)
+	local BT = GetBT()
+	local mod = BT and BT:GetModule("StanceBar", true)
+	if not (mod and mod.bar and mod:IsEnabled()) then return end
+	local rows = self:GetNumBottomRows()
+	local px = BUTTON_PX[rows]
+	local top = BAR_INSET + rows * px + (rows - 1) * BUTTON_PADDING_PX
+	local scale = 0.9
+	mod.db.profile.padding = 2
+	SetBarPosition(mod.bar, "BOTTOM", 0, top + 28 - BT_MARGIN_BOTTOM * scale, scale)
+	ApplyBar(mod.bar)
+end
+
+-- Full default layout (all bars). Used on first run and from the options menu.
+Module.ApplyDefaultLayout = function(self)
+	local BT = GetBT()
+	if not BT then return end
+	if InCombatLockdown() then
+		self.pendingLayout = true
+		self:RegisterEvent("PLAYER_REGEN_ENABLED", "OnRegenEnabled")
+		return
+	end
+	local AB = BT:GetModule("ActionBars", true)
+	if not AB or not AB.actionbars then return end
+
+	-- global button settings
+	local p = BT.db.profile
+	p.outofrange = "button"
+	p.snapping = true
+	p.minimapIcon = p.minimapIcon or {}
+	p.minimapIcon.hide = true
+
+	-- bar 2 is page 2 of the main bar (not shown by the default UI either)
+	self:DisableActionBar(AB, 2)
+
+	-- bottom rows (1/6/5)
+	self:ApplyBottomRows()
+
+	-- right side bars: 3 (Blizzard right) and 4 (Blizzard right 2), vertical, 36px
+	local sidePad = 2
+	local colW = BT_BUTTON + sidePad
+	local sideTop = -326 + BT_MARGIN_TOP
+	for idx, id in ipairs({ 3, 4 }) do
+		AB:EnableBar(id)
+		local bar = AB.actionbars[id]
+		bar.config.rows = 12
+		bar.config.buttons = 12
+		bar.config.padding = sidePad
+		-- TOPRIGHT of the bar frame = 5px right of the buttons' right edge
+		local x = -20 - (idx - 1) * colW + BT_MARGIN_LEFT
+		SetBarPosition(bar, "TOPRIGHT", x, sideTop, 1)
+		ApplyBar(bar)
+	end
+
+	-- extra stance pages are handled by bar 1 paging, keep 7-10 off
+	for id = 7, 10 do self:DisableActionBar(AB, id) end
+
+	-- pet bar: vertical column left of the side bars (same place as the old DiabolicUI pet bar)
+	local pet = BT:GetModule("PetBar", true)
+	if pet and pet.bar then
+		pet.db.profile.rows = 10
+		pet.db.profile.padding = 2
+		SetBarPosition(pet.bar, "TOPRIGHT", -20 - 2 * colW - 2 + BT_MARGIN_LEFT, sideTop, 1)
+		ApplyBar(pet.bar)
+	end
+
+	-- stance bar above the bottom rows
+	self:PositionStanceBar()
+
+	-- shaman totem bar: left of the stance bar
+	local totems = BT:GetModule("MultiCast", true)
+	if totems and totems.bar then
+		local rows = self:GetNumBottomRows()
+		local top = BAR_INSET + rows * BUTTON_PX[rows] + (rows - 1) * BUTTON_PADDING_PX
+		SetBarPosition(totems.bar, "BOTTOM", -220, top + 28, 1)
+		ApplyBar(totems.bar)
+	end
+
+	-- micro menu: bottom right, like the default UI. Includes the shop and transmog buttons.
+	local micro = BT:GetModule("MicroMenu", true)
+	if micro then
+		micro.db.profile.enabled = true
+		if not micro:IsEnabled() then micro:Enable() end
+		if micro.bar then
+			micro.db.profile.padding = -3
+			micro.db.profile.rows = 1
+			SetBarPosition(micro.bar, "BOTTOMRIGHT", -8, 2, 0.75)
+			ApplyBar(micro.bar)
+		end
+	end
+
+	-- bags: right above the micro menu
+	local bags = BT:GetModule("BagBar", true)
+	if bags then
+		bags.db.profile.enabled = true
+		if not bags:IsEnabled() then bags:Enable() end
+		if bags.bar then
+			bags.db.profile.padding = 0
+			bags.db.profile.rows = 1
+			SetBarPosition(bags.bar, "BOTTOMRIGHT", -8, 46, 0.8)
+			ApplyBar(bags.bar)
+		end
+	end
+
+	-- XP/Rep: DiabolicUI has its own XP bar (and the Diablo-WoW paragon bar), turn off Bartender's
+	for _, name in ipairs({ "XPBar", "RepBar" }) do
+		local m = BT:GetModule(name, true)
+		if m and m.db and m.db.profile.enabled then
+			m:ToggleModule(nil, false)
+		end
+	end
+
+	p.diabolicLayout = LAYOUT_VERSION
+	self:RaiseBars()
+	print("|cff8a0707Diabolic|r|cffffffffUI|r: стандартная раскладка панелей применена. /dui — настройки.")
+end
+
+-- Micro menu and bags sit on top of the angel artwork, so keep them above it
+Module.RaiseBars = function(self)
+	local BT = GetBT()
+	if not BT then return end
+	for _, name in ipairs({ "MicroMenu", "BagBar" }) do
+		local m = BT:GetModule(name, true)
+		if m and m.bar then
+			m.bar:SetFrameStrata("HIGH")
+			if m.bar.buttons then
+				for _, b in pairs(m.bar.buttons) do
+					if b.SetFrameStrata then b:SetFrameStrata("HIGH") end
+				end
 			end
-			self.artwork["bar"..i]:Hide()
-			self.artwork["bar"..i.."skull"]:Hide()
-			self.artwork["bar"..i.."left"]:Hide()
-			self.artwork["bar"..i.."right"]:Hide()
 		end
 	end
 end
 
-Module.GrabKeybinds = Module:Wrap(function(self)
-	local bars = self.bars
-	if not self.binding_table then
-		self.binding_table = {
-			"ACTIONBUTTON%d", 				-- main action bar
-			"MULTIACTIONBAR1BUTTON%d", 		-- bottomleft bar
-			"MULTIACTIONBAR2BUTTON%d", 		-- bottomright bar
-			"MULTIACTIONBAR3BUTTON%d",  	-- right sidebar
-			"MULTIACTIONBAR4BUTTON%d", 		-- left sidebar
-			"BONUSACTIONBUTTON%d", 			-- pet bar
-			"SHAPESHIFTBUTTON%d" 			-- stance bar
-		}
-		if Engine:IsBuild("Cata") then
-			tinsert(self.binding_table, "EXTRAACTIONBUTTON%d") -- extra action button
-		end
+Module.OnRegenEnabled = function(self)
+	self:UnregisterEvent("PLAYER_REGEN_ENABLED", "OnRegenEnabled")
+	if self.pendingLayout then
+		self.pendingLayout = nil
+		self:ApplyDefaultLayout()
 	end
-	for bar_number,action_name in ipairs(self.binding_table) do
-		local bar = bars[bar_number] -- upvalue the current bar
-		if bar then
-			ClearOverrideBindings(bar) -- clear current overridebindings
-			for button_number, button in bar:GetAll() do -- only work with the buttons that have actually spawned
-				local action = action_name:format(button_number) -- get the correct keybinding action name
-				button:SetBindingAction(action) -- store the binding action name on the button
-				for key_number = 1, select("#", GetBindingKey(action)) do -- iterate through the registered keys for the action
-					local key = select(key_number, GetBindingKey(action)) -- get a key for the action
-					if key and key ~= "" then
-						-- this is why we need named buttons
-						SetOverrideBindingClick(bars[bar_number], false, key, button:GetName()) -- assign the key to our own button
-					end	
-				end
+end
+
+-- Called once the embedded DiabolicBars are fully up
+Module.OnBarsReady = function(self)
+	local BT = GetBT()
+	if not BT then
+		return
+	end
+	if (BT.db.profile.diabolicLayout or 0) < LAYOUT_VERSION then
+		self:ApplyDefaultLayout()
+	else
+		self:RaiseBars()
+	end
+	self:UpdateArtwork()
+
+	-- Talents/vehicles reparent the micro buttons back to the hidden Blizzard bar
+	local micro = BT:GetModule("MicroMenu", true)
+	if micro and MainMenuBar_ToPlayerArt then
+		hooksecurefunc("MainMenuBar_ToPlayerArt", function()
+			if micro:IsEnabled() and micro.RestoreButtons then
+				micro:RestoreButtons()
 			end
-		end
-	end	
-	
-	-- update the vehicle bar keybind display
-	local vehicle_bar = self:GetWidget("Bar: Vehicle"):GetFrame()
-	for button_number, button in vehicle_bar:GetAll() do -- only work with the buttons that have actually spawned
-		local action = "ACTIONBUTTON"..button_number -- get the correct keybinding action name
-		button:SetBindingAction(action) -- store the binding action name on the button
+		end)
 	end
+end
 
-	-- TODO: add binds for our custom fishing/garrison bar
-	if Engine:IsBuild("MoP") then
-		if not self.petbattle_controller then
-			-- The blizzard petbattle UI gets its keybinds from the primary action bar, 
-			-- so in order for the petbattle UI keybinds to function properly, 
-			-- we need to temporarily give the primary action bar backs its keybinds.
-			local controller = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
-			controller:SetAttribute("_onstate-petbattle", [[
-				if newstate == "petbattle" then
-					for i = 1,6 do
-						local our_button, blizz_button = ("CLICK EngineBar1Button%d:LeftButton"):format(i), ("ACTIONBUTTON%d"):format(i)
+-------------------------------------------------------------------------------
+-- Diablo-WoW: paragon bar lives in MainMenuBar, which is hidden by this UI.
+-- Move it to the DiabolicUI XP bar slot.
+-------------------------------------------------------------------------------
+Module.AdoptParagonBar = function(self)
+	local frame = _G.ParagonXPBarFrame
+	if not frame or self.paragonAdopted then return end
+	self.paragonAdopted = true
 
-						-- Grab the keybinds from our own primary action bar,
-						-- and assign them to the default blizzard bar. 
-						-- The pet battle system will in turn get its bindings 
-						-- from the default blizzard bar, and the magic works! :)
-						
-						for k=1,select("#", GetBindingKey(our_button)) do
-							local key = select(k, GetBindingKey(our_button)) -- retrieve the binding key from our own primary bar
-							self:SetBinding(true, key, blizz_button) -- assign that key to the default bar
-						end
-						
-						-- do the same for the default UIs bindings
-						for k=1,select("#", GetBindingKey(blizz_button)) do
-							local key = select(k, GetBindingKey(blizz_button))
-							self:SetBinding(true, key, blizz_button)
-						end	
-					end
-				else
-					-- Return the key bindings to whatever buttons they were
-					-- assigned to before we so rudely grabbed them! :o
-					self:ClearBindings()
-				end
-			]])
-			self.petbattle_controller = controller
-		end
-		UnregisterStateDriver(self.petbattle_controller, "petbattle")
-		RegisterStateDriver(self.petbattle_controller, "petbattle", "[petbattle]petbattle;nopetbattle")
+	local function place()
+		local Main = self:GetWidget("Controller: Main"):GetFrame()
+		local cfg = self.config.structure.controllers.xp
+		local w = cfg.size[tostring(self:GetNumBottomRows())][1]
+		frame:SetParent(Main)
+		frame:ClearAllPoints()
+		frame:SetPoint(unpack(cfg.position))
+		frame:SetWidth(w)
+		local bar = _G.ParagonXPBar
+		if bar then bar:SetWidth(w) end
+		frame:SetFrameStrata("BACKGROUND")
+		self:UpdateArtwork()
 	end
-	
-	if not self.vehicle_controller then
-		-- We're using a custom vehicle bar, and in order for it to work properly, 
-		-- we need to borrow the primary action bar's keybinds temporarily.
-		-- This will override the temporary bindings normally assigned to our own main action bar. 
-		local controller = CreateFrame("Frame", nil, UIParent, "SecureHandlerStateTemplate")
-		controller:SetAttribute("_onstate-vehicle", [[
-			if newstate == "vehicle" then
-				for i = 1,6 do
-					local our_button, vehicle_button = ("ACTIONBUTTON%d"):format(i), ("CLICK EngineVehicleBarButton%d:LeftButton"):format(i)
+	place()
+	hooksecurefunc(frame, "Show", place)
+	frame:HookScript("OnHide", function() self:UpdateArtwork() end)
+	self:GetWidget("Controller: Main"):GetFrame():HookScript("OnAttributeChanged", function(_, name)
+		if name == "numbars" then place() end
+	end)
+end
 
-					-- Grab the keybinds from the default action bar,
-					-- and assign them to our custom vehicle bar. 
-
-					for k=1,select("#", GetBindingKey(our_button)) do
-						local key = select(k, GetBindingKey(our_button)) -- retrieve the binding key from our own primary bar
-						self:SetBinding(true, key, vehicle_button) -- assign that key to the vehicle bar
-					end
-				end
-			else
-				-- Return the key bindings to whatever buttons they were
-				-- assigned to before we so rudely grabbed them! :o
-				self:ClearBindings()
-			end
-		]])
-		
-		self.vehicle_controller = controller
-	end
-
-	UnregisterStateDriver(self.vehicle_controller, "vehicle")
-	if Engine:IsBuild("MoP") then -- also applies to WoD and (possibly) Legion
-		RegisterStateDriver(self.vehicle_controller, "vehicle", "[overridebar][possessbar][shapeshift][vehicleui]vehicle;novehicle")
-	elseif Engine:IsBuild("WotLK") then -- also applies to Cata
-		RegisterStateDriver(self.vehicle_controller, "vehicle", "[bonusbar:5][vehicleui]vehicle;novehicle")
-	end
-end)
-
+-------------------------------------------------------------------------------
+-- Init
+-------------------------------------------------------------------------------
 Module.OnInit = function(self, event, ...)
 	self.config = self:GetStaticConfig("ActionBars") -- static config
-	self.db = self:GetConfig("ActionBars", "character") -- per user settings for bars
+	self.db = self:GetConfig("ActionBars", "character") -- per character settings
 
-	-- Enable controllers
-	-- These mostly handle visibility, size and layout,
-	-- so that other secure frames can anchor themselves to the bars.
-	self:GetWidget("Controller: Main"):Enable()
-	self:GetWidget("Controller: Side"):Enable()
-	self:GetWidget("Controller: Stance"):Enable()
-	self:GetWidget("Controller: Pet"):Enable()
-	self:GetWidget("Controller: Menu"):Enable()
-	self:GetWidget("Controller: Chat"):Enable()
-
-	-- Enable bars
-	-- Bars exist within their respective controllers, 
-	-- but handles their own paging and visibilty.
-	self:GetWidget("Bar: Vehicle"):Enable()
-	self:GetWidget("Bar: 1"):Enable()
-	self:GetWidget("Bar: 2"):Enable()
-	self:GetWidget("Bar: 3"):Enable()
-	self:GetWidget("Bar: 4"):Enable()
-	self:GetWidget("Bar: 5"):Enable()
-	self:GetWidget("Bar: Pet"):Enable()
-	self:GetWidget("Bar: Stance"):Enable()
+	self:CreateAnchors()
 	self:GetWidget("Bar: XP"):Enable()
-	
-	-- enable menus
-	self:GetWidget("Menu: Main"):Enable()
-	self:GetWidget("Menu: Chat"):Enable()
-	
-
-	if Engine:IsBuild("Cata") then
-		self:GetWidget("Bar: Extra"):Enable()
-
-		-- skinning (TODO: move to the blizzard skinning module)
-		local UIHider = CreateFrame("Frame")
-		UIHider:Hide()
-		StreamingIcon:SetParent(UIHider)
-	end
-	
-	-- This is used to reassign the keybinds, 
-	-- and the order of the bars determine what keybinds to grab. 
-	self.bars = {} 
-	tinsert(self.bars, self:GetWidget("Bar: 1"):GetFrame())	-- 1
-	tinsert(self.bars, self:GetWidget("Bar: 2"):GetFrame())	-- 2
-	tinsert(self.bars, self:GetWidget("Bar: 3"):GetFrame())	-- 3
-	tinsert(self.bars, self:GetWidget("Bar: 4"):GetFrame())	-- 4
-	tinsert(self.bars, self:GetWidget("Bar: 5"):GetFrame())	-- 5
-	tinsert(self.bars, self:GetWidget("Bar: Pet"):GetFrame()) -- 7
-	tinsert(self.bars, self:GetWidget("Bar: Stance"):GetFrame()) -- 6
-	if Engine:IsBuild("Cata") then
-		--tinsert(self.bars, self:GetWidget("Bar: Extra"):GetFrame()) --8
-	end
-		
-	self:GrabKeybinds()
-	self:RegisterEvent("UPDATE_BINDINGS", "GrabKeybinds")
-
-	-- make sure the artwork module captures xp visibility updates
-	self:RegisterEvent("PLAYER_ALIVE", "UpdateArtwork")
-	self:RegisterEvent("PLAYER_ENTERING_WORLD", "UpdateArtwork")
-	self:RegisterEvent("PLAYER_LEVEL_UP", "UpdateArtwork")
-	self:RegisterEvent("PLAYER_XP_UPDATE", "UpdateArtwork")
-	self:RegisterEvent("PLAYER_LOGIN", "UpdateArtwork")
-	self:RegisterEvent("PLAYER_FLAGS_CHANGED", "UpdateArtwork")
-	self:RegisterEvent("DISABLE_XP_GAIN", "UpdateArtwork")
-	self:RegisterEvent("ENABLE_XP_GAIN", "UpdateArtwork")
-	self:RegisterEvent("PLAYER_UPDATE_RESTING", "UpdateArtwork")
-	
-	if not Engine:IsBuild("Cata") then
-
-		-- faking a CVar here for WotLK clients
-		local value, defaultValue, serverStoredAccountWide, serverStoredPerCharacter = GetCVarInfo("ActionButtonUseKeyDown")
-		if value == nil and defaultValue == nil and serverStoredAccountWide == nil and serverStoredPerCharacter == nil then
-			RegisterCVar("ActionButtonUseKeyDown", false)
-			hooksecurefunc("SetCVar", function(name, value) 
-				if name == "ActionButtonUseKeyDown" then
-					self:GetWidget("Template: Button"):OnEvent("CVAR_UPDATE", "ACTION_BUTTON_USE_KEY_DOWN", value)
-					self.db.cast_on_down = GetCVarBool("ActionButtonUseKeyDown") and 1 or 0 -- store the change 
-				end
-			end)
-			
-			-- set the newly created CVar to our stored setting
-			SetCVar("ActionButtonUseKeyDown", self.db.cast_on_down == 1 and "1" or "0")
-		end
-		
-		-- add the button to the same menu as it's found in from Cata and up
-		local name = "InterfaceOptionsCombatPanelActionButtonUseKeyDown"
-		if not _G[name] then
-			-- We're mimicking what blizzard do to create the button in Cata and higher here
-			-- We can't directly add it to their system, though, because the menu is secure and that would taint it 
-			local button = CreateFrame("CheckButton", "$parentActionButtonUseKeyDown", InterfaceOptionsCombatPanel, "InterfaceOptionsCheckButtonTemplate")
-			button:SetPoint("TOPLEFT", button:GetParent():GetName().."SelfCastKeyDropDown", "BOTTOMLEFT", 14, -24)
-			button:SetChecked(GetCVarBool("ActionButtonUseKeyDown"))
-			button:SetScript("OnClick", function() 
-				if button:GetChecked() then
-					SetCVar("ActionButtonUseKeyDown", "1")
-				else
-					SetCVar("ActionButtonUseKeyDown", "0")
-				end
-				self:GetWidget("Template: Button"):OnEvent("CVAR_UPDATE", "ACTION_BUTTON_USE_KEY_DOWN", GetCVar("ActionButtonUseKeyDown"))
-			end)
-			_G[button:GetName() .. "Text"]:SetText(L["Cast action keybinds on key down"])
-		end
-		
-	end
-	
 end
 
 Module.OnEnable = function(self, event, ...)
+	-- hide the Blizzard bars (DiabolicBars also does this, both are harmless together)
 	local BlizzardUI = self:GetHandler("BlizzardUI")
 	BlizzardUI:GetElement("ActionBars"):Disable()
-	
-	if Engine:IsBuild("Legion") then
-		BlizzardUI:GetElement("Menu_Panel"):Remove(5, "InterfaceOptionsActionBarsPanel")
-	elseif Engine:IsBuild("WoD") then
-		BlizzardUI:GetElement("Menu_Panel"):Remove(6, "InterfaceOptionsActionBarsPanel")
-	elseif Engine:IsBuild("MoP") then
-		BlizzardUI:GetElement("Menu_Panel"):Remove(6, "InterfaceOptionsActionBarsPanel")
-		--BlizzardUI:GetElement("Menu_Option"):Remove(true, "InterfaceOptionsActionBarsPanelBottomLeft")
-		--BlizzardUI:GetElement("Menu_Option"):Remove(true, "InterfaceOptionsActionBarsPanelBottomRight")
-		--BlizzardUI:GetElement("Menu_Option"):Remove(true, "InterfaceOptionsActionBarsPanelRight")
-		--BlizzardUI:GetElement("Menu_Option"):Remove(true, "InterfaceOptionsActionBarsPanelRightTwo")
-		--BlizzardUI:GetElement("Menu_Option"):Remove(true, "InterfaceOptionsActionBarsPanelAlwaysShowActionBars")
-		
-	elseif Engine:IsBuild("Cata") then
-		BlizzardUI:GetElement("Menu_Panel"):Remove(6, "InterfaceOptionsActionBarsPanel")
-	elseif Engine:IsBuild("WotLK") then
-		BlizzardUI:GetElement("Menu_Panel"):Remove(6, "InterfaceOptionsActionBarsPanel")
-	end
-	
-	-- In theory this shouldn't have any effect, but by removing the menu panels above, 
-	-- we're preventing the blizzard UI from calling it, and for some reason it is 
-	-- required to be called at least once, or the game won't fire off the events 
-	-- that tell the UI that the player has an active pet out. 
-	-- In other words: without it both the pet bar and pet unitframe will fail after a /reload
+
+	-- required at least once, or the pet bar/pet frame fail after a /reload
 	SetActionBarToggles(nil, nil, nil, nil, nil)
 
-	-- enable templates (button events, etc)
-	self:GetWidget("Template: Button"):Enable()
+	self:UpdateArtwork()
+	for _, e in ipairs({ "PLAYER_ALIVE", "PLAYER_LEVEL_UP", "PLAYER_XP_UPDATE", "PLAYER_FLAGS_CHANGED",
+		"DISABLE_XP_GAIN", "ENABLE_XP_GAIN", "PLAYER_UPDATE_RESTING" }) do
+		self:RegisterEvent(e, "UpdateArtwork")
+	end
+	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
+end
 
-	-- apply all module settings
-	-- this also fires off the enabling and positioning of the actionbars
-	self:ApplySettings()
+Module.OnEnteringWorld = function(self)
+	self:UnregisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
+	self:AdoptParagonBar()
+	self:OnBarsReady()
+	self:RegisterEvent("PLAYER_ENTERING_WORLD", "UpdateArtwork")
+end
+
+-- slash helpers used by the options module
+Module.OpenBarOptions = function(self)
+	local BT = GetBT()
+	if BT and BT.ChatCommand then BT:ChatCommand("") end
+end
+
+Module.ToggleBarLock = function(self)
+	local BT = GetBT()
+	if BT and BT.ToggleLock then BT:ToggleLock() end
 end

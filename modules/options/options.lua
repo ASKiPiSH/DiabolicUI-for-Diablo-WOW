@@ -1,744 +1,467 @@
--- DiabolicUI/modules/options/options.lua
--- Полное меню настроек (LK 3.3.5a):
---  * Настройки по персонажу (perChar)
---  * Режим переноса фреймов (со снапом к сетке)
---  * Прокручиваемый список элементов
---  * Вкладки: "Основные" и "Дополнительно"
---  * Кнопка у миникарты (иконка аддона)
---  * Импорт/Экспорт профиля
+--[[
+	DiabolicUI options (Diablo-WoW) — one menu for the whole interface.
+	Replaces the old options.lua / movers.lua / moveframes.lua / minimap_button.lua,
+	which overlapped, registered the same /diomove command three times and saved into
+	a table that was never declared in the .toc (so nothing was kept between sessions).
 
-local Addon, Engine = ...
-local Options = Engine:NewModule("Options")
+	/dui                 open/close the menu
+	/dui lock            lock/unlock the action bars (drag them while unlocked)
+	/dui kb              keybinding mode (hover a button and press a key)
+	/dui reset           default action bar layout
+	/dui errors [clear]  print/clear the error log
+	Also available in Esc > Interface > AddOns > DiabolicUI.
+]]
+local ADDON, Engine = ...
+local Module = Engine:NewModule("Options", "LOW")
+local path = ([[Interface\AddOns\%s\media\]]):format(ADDON)
 
-------------------------------------------------------------
--- SavedVariables (общая БД с мапой perChar -> активный профиль)
-------------------------------------------------------------
-DiabolicUI_OptionsDB = DiabolicUI_OptionsDB or { version=1, profiles={}, perChar={} }
+local pairs, ipairs, type, select, tostring = pairs, ipairs, type, select, tostring
+local CreateFrame = CreateFrame
+local InCombatLockdown = InCombatLockdown
 
-local function PerCharKey()
-	local realm = GetRealmName() or "DefaultRealm"
-	local name  = UnitName("player") or "Player"
-	return realm.." - "..name
+local PREFIX = "|cff8a0707Diabolic|r|cffffffffUI|r: "
+local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. msg) end
+
+-------------------------------------------------------------------------------
+-- saved settings (per character)
+-------------------------------------------------------------------------------
+local function CharDB()
+	DiabolicUI_CharDB = DiabolicUI_CharDB or {}
+	DiabolicUI_CharDB.hidden = DiabolicUI_CharDB.hidden or {}
+	return DiabolicUI_CharDB
 end
 
-local function ActiveProfileName()
-	local key = PerCharKey()
-	local pc  = DiabolicUI_OptionsDB.perChar
-	pc[key] = pc[key] or { activeProfile = "Default" }
-	return pc[key].activeProfile or "Default"
+-------------------------------------------------------------------------------
+-- element registry: things that can be hidden
+-------------------------------------------------------------------------------
+local Hider = CreateFrame("Frame")
+Hider:Hide()
+
+local function W(module, widget)
+	local m = Engine:GetModule(module, true)
+	local w = m and m:GetWidget(widget)
+	if w and w.GetFrame then return w:GetFrame() end
 end
 
-local function EnsureProfile(name)
-	local db = DiabolicUI_OptionsDB
-	db.profiles[name] = db.profiles[name] or {
-		frames  = {},                 -- позиции/масштабы/замки
-		modules = {},                 -- вкл/выкл модулей
-		grid    = { enabled=false, size=8, show=false } -- сетка
-	}
-	local p = db.profiles[name]
-	p.grid.size    = p.grid.size or 8
-	p.grid.enabled = not not p.grid.enabled
-	p.grid.show    = not not p.grid.show
-	return p
+local function Collect(...)
+	local t = {}
+	for i = 1, select("#", ...) do
+		local f = select(i, ...)
+		if type(f) == "table" and f.SetParent then t[#t + 1] = f end
+	end
+	return t
 end
 
-local function P() return EnsureProfile(ActiveProfileName()) end
+local Elements = {
+	{ key = "playerorbs", title = "Сферы здоровья и ресурса", secure = true, get = function()
+		local UF = Engine:GetModule("UnitFrames", true)
+		local t = Collect(W("UnitFrames", "Unit: Player"))
+		if UF and UF.artwork then
+			for _, tex in pairs(UF.artwork) do
+				local p = tex.GetParent and tex:GetParent()
+				if p then
+					local dupe
+					for _, f in ipairs(t) do if f == p then dupe = true end end
+					if not dupe then t[#t + 1] = p end
+				end
+			end
+		end
+		return t
+	end },
+	{ key = "target", title = "Фрейм цели (сверху)", secure = true, get = function() return Collect(W("UnitFrames", "Unit: Target")) end },
+	{ key = "tot", title = "Цель цели", secure = true, get = function() return Collect(W("UnitFrames", "Unit: ToT")) end },
+	{ key = "focus", title = "Фокус", secure = true, get = function() return Collect(W("UnitFrames", "Unit: Focus")) end },
+	{ key = "pet", title = "Фрейм питомца", secure = true, get = function() return Collect(W("UnitFrames", "Unit: Pet")) end },
+	{ key = "minimap", title = "Миникарта", get = function()
+		local m = Engine:GetModule("Minimap", true)
+		return Collect(m and m.GetFrame and m:GetFrame())
+	end },
+	{ key = "xp", title = "Полоска опыта / парагона", get = function()
+		return Collect(W("ActionBars", "Bar: XP"), _G.ParagonXPBarFrame)
+	end },
+	{ key = "buffs", title = "Баффы и дебаффы игрока", get = function()
+		return Collect(BuffFrame, TemporaryEnchantFrame, ConsolidatedBuffs)
+	end },
+	{ key = "tracker", title = "Список заданий", get = function() return Collect(WatchFrame) end },
+	{ key = "chat", title = "Окна чата", get = function()
+		local t = {}
+		for i = 1, (NUM_CHAT_WINDOWS or 10) do
+			for _, s in ipairs({ "", "Tab", "ButtonFrame" }) do
+				local f = _G["ChatFrame" .. i .. s]
+				if f then t[#t + 1] = f end
+			end
+		end
+		for _, n in ipairs({ "GeneralDockManager", "ChatFrameMenuButton", "FriendsMicroButton" }) do
+			if _G[n] then t[#t + 1] = _G[n] end
+		end
+		return t
+	end },
+}
+local ElementByKey = {}
+for _, e in ipairs(Elements) do ElementByKey[e.key] = e end
 
-------------------------------------------------------------
--- Реестр управляемых модулей/виджетов
-------------------------------------------------------------
-local Registry = {
-	Modules = {
-		"ActionBars","Minimap","UnitFrames","Buffs","CastBars",
-		"NamePlates","Objectives","Tooltips","Chat","Bags"
-	},
-	Widgets = {
-		-- ActionBars
-		{ module="ActionBars", widget="Controller: Main",  title="Контроллер: Main"  },
-		{ module="ActionBars", widget="Controller: Side",  title="Контроллер: Side"  },
-		{ module="ActionBars", widget="Bar: 1",  title="Панель 1" },
-		{ module="ActionBars", widget="Bar: 2",  title="Панель 2" },
-		{ module="ActionBars", widget="Bar: 3",  title="Панель 3" },
-		{ module="ActionBars", widget="Bar: 4",  title="Панель 4" },
-		{ module="ActionBars", widget="Bar: 5",  title="Панель 5" },
-		{ module="ActionBars", widget="Bar: XP", title="Панель опыта" },
-		{ module="ActionBars", widget="Bar: Pet",     title="Панель питомца" },
-		{ module="ActionBars", widget="Bar: Stance",  title="Панель стоек" },
-		{ module="ActionBars", widget="Bar: Vehicle", title="Панель транспорта" },
+local pendingApply
+local function ApplyElement(e, hidden)
+	if e.secure and InCombatLockdown() then
+		pendingApply = true
+		return false
+	end
+	for _, f in ipairs(e.get() or {}) do
+		if hidden then
+			if not f.__duiParent then
+				f.__duiParent = f:GetParent() or UIParent
+				f:SetParent(Hider)
+			end
+		elseif f.__duiParent then
+			f:SetParent(f.__duiParent)
+			f.__duiParent = nil
+		end
+	end
+	return true
+end
 
-		-- Minimap
-		{ module="Minimap", widget=nil, title="Миникарта", get=function(mod)
-			local f = mod.GetFrame and mod:GetFrame()
-			return f and { f } or {}
-		end },
+Module.SetElementHidden = function(self, key, hidden)
+	local e = ElementByKey[key]
+	if not e then return end
+	CharDB().hidden[key] = hidden and true or nil
+	if not ApplyElement(e, hidden) then
+		Print("изменение применится после выхода из боя.")
+	end
+	if key == "xp" then
+		local AB = Engine:GetModule("ActionBars", true)
+		if AB and AB.UpdateArtwork then AB:UpdateArtwork() end
+	end
+end
 
-		-- UnitFrames
-		{ module="UnitFrames", widget="Unit: Player", title="Фрейм игрока" },
-		{ module="UnitFrames", widget="Unit: Target", title="Фрейм цели"  },
-		{ module="UnitFrames", widget="Unit: Focus",  title="Фрейм фокуса"},
-		{ module="UnitFrames", widget="Unit: ToT",    title="Цель цели"   },
-		{ module="UnitFrames", widget="Unit: Pet",    title="Фрейм питомца"},
-	}
+Module.ApplyAllElements = function(self)
+	local hidden = CharDB().hidden
+	for _, e in ipairs(Elements) do
+		if hidden[e.key] then ApplyElement(e, true) end
+	end
+end
+
+-------------------------------------------------------------------------------
+-- action bars (embedded DiabolicBars / Bartender4)
+-------------------------------------------------------------------------------
+local function BT() return _G.DiabolicBars end
+
+local Bars = {
+	{ id = 1, title = "Основная панель (1 ряд)" },
+	{ id = 6, title = "Нижняя панель (2 ряд)" },
+	{ id = 5, title = "Нижняя панель (3 ряд)" },
+	{ id = 3, title = "Правая панель 1" },
+	{ id = 4, title = "Правая панель 2" },
+	{ module = "PetBar", title = "Панель питомца" },
+	{ module = "StanceBar", title = "Панель стоек / облика" },
+	{ module = "MicroMenu", title = "Меню (персонаж, магазин, трансмог...)" },
+	{ module = "BagBar", title = "Сумки" },
+	{ module = "MultiCast", title = "Тотемы (шаман)" },
 }
 
--- Публичное API для регистрации дополнительных виджетов
-_G.DiabolicUI_RegisterOptionsWidget = function(moduleName, title, getFramesFunc, widgetName)
-	table.insert(Registry.Widgets, { module=moduleName, title=title, get=getFramesFunc, widget=widgetName })
+local function BarEnabled(b)
+	local bt = BT()
+	if not bt or not bt.db then return false end
+	if b.id then
+		local AB = bt:GetModule("ActionBars", true)
+		return AB and AB.db.profile.actionbars[b.id].enabled
+	end
+	local m = bt:GetModule(b.module, true)
+	return m and m.db and m.db.profile.enabled
 end
 
-------------------------------------------------------------
--- Утилиты
-------------------------------------------------------------
-local function call(obj, method, ...)
-	if obj and obj[method] then return obj[method](obj, ...) end
-end
-
-local function GetWidgetFrames(moduleName, widgetName, customGet)
-	local mod = Engine:GetModule(moduleName, true)
-	if not mod then return {} end
-
-	if customGet then
-		local ok, frames = pcall(customGet, mod)
-		if ok and type(frames)=="table" then
-			local out={} ; for _,f in ipairs(frames) do if f then table.insert(out, f) end end
-			return out
-		end
-		return {}
+local function SetBarEnabled(b, on)
+	local bt = BT()
+	if not bt or InCombatLockdown() then
+		Print("панели нельзя менять в бою.")
+		return
 	end
-
-	if not widgetName then
-		local f = call(mod,"GetFrame"); return f and {f} or {}
-	end
-	local w = call(mod,"GetWidget", widgetName); if not w then return {} end
-	if w.GetFrame then
-		local a,b,c = w:GetFrame(); local t={}
-		if a then t[#t+1]=a end; if b then t[#t+1]=b end; if c then t[#t+1]=c end
-		return t
-	end
-	return {}
-end
-
-local function ReadPoint(f)
-	local p, rel, rp, x, y = f:GetPoint()
-	return p or "CENTER", (rel and rel:GetName()) or "UIParent", rp or "CENTER", x or 0, y or 0
-end
-
--- snap helpers
-local function roundToStep(val, step)
-	if not step or step<=1 then return val end
-	local half = step*0.5
-	if val>=0 then return math.floor((val+half)/step)*step
-	else return math.ceil((val-half)/step)*step end
-end
-
-------------------------------------------------------------
--- Сетка
-------------------------------------------------------------
-local Grid = { frame=nil, V={}, H={} }
-
-local function UpdateGridOverlay()
-	local profile=P()
-	if not profile.grid.show then if Grid.frame then Grid.frame:Hide() end; return end
-	local size = profile.grid.size or 8
-	if not Grid.frame then
-		Grid.frame = CreateFrame("Frame","DiabolicUI_GridOverlay",UIParent)
-		Grid.frame:SetFrameStrata("TOOLTIP")
-		Grid.frame:SetAllPoints()
-	end
-	local w,h = UIParent:GetWidth(), UIParent:GetHeight()
-	local needV, needH = math.floor(w/size), math.floor(h/size)
-
-	for i=1,needV do
-		if not Grid.V[i] then
-			local t=Grid.frame:CreateTexture(nil,"ARTWORK")
-			t:SetTexture("Interface\\Buttons\\WHITE8x8")
-			t:SetVertexColor(1,1,1,0.08)
-			Grid.V[i]=t
-		end
-		local x=i*size
-		local line=Grid.V[i]
-		line:ClearAllPoints()
-		line:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, 0)
-		line:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, 0)
-		line:SetWidth(1); line:Show()
-	end
-	for i=needV+1,#Grid.V do if Grid.V[i] then Grid.V[i]:Hide() end end
-
-	for i=1,needH do
-		if not Grid.H[i] then
-			local t=Grid.frame:CreateTexture(nil,"ARTWORK")
-			t:SetTexture("Interface\\Buttons\\WHITE8x8")
-			t:SetVertexColor(1,1,1,0.08)
-			Grid.H[i]=t
-		end
-		local y=-i*size
-		local line=Grid.H[i]
-		line:ClearAllPoints()
-		line:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, y)
-		line:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, y)
-		line:SetHeight(1); line:Show()
-	end
-	for i=needH+1,#Grid.H do if Grid.H[i] then Grid.H[i]:Hide() end end
-	Grid.frame:Show()
-end
-
-------------------------------------------------------------
--- Применение конфигов к фрейму
-------------------------------------------------------------
-local function ApplyFrameConfig(f, cfg)
-	if not (f and f.SetPoint) then return end
-	if cfg.scale and f.SetScale then f:SetScale(cfg.scale) end
-	if cfg.point and cfg.rel and cfg.relPoint then
-		f:ClearAllPoints()
-		local rel = _G[cfg.rel] or UIParent
-		local x,y = cfg.x or 0, cfg.y or 0
-		if P().grid.enabled then
-			local step=P().grid.size or 8
-			x=roundToStep(x,step); y=roundToStep(y,step)
-			cfg.x, cfg.y = x,y
-		end
-		f:SetPoint(cfg.point, rel, cfg.relPoint, x, y)
-	end
-	if cfg.locked then
-		if f.EnableMouse then f:EnableMouse(false) end
-		if f.SetMovable then f:SetMovable(false) end
-		if f.RegisterForDrag then f:RegisterForDrag() end
+	if b.id then
+		local AB = bt:GetModule("ActionBars", true)
+		if not AB then return end
+		if on then AB:EnableBar(b.id) else AB:DisableBar(b.id); AB.db.profile.actionbars[b.id].enabled = false end
 	else
-		if f.EnableMouse then f:EnableMouse(true) end
-		if f.SetMovable then f:SetMovable(true) end
-		if f.RegisterForDrag then f:RegisterForDrag("LeftButton") end
-		f:SetScript("OnDragStart", function(self) if not cfg.locked then self:StartMoving() end end)
-		f:SetScript("OnDragStop", function(self)
-			self:StopMovingOrSizing()
-			local p, rel, rp, x, y = self:GetPoint()
-			if P().grid.enabled then
-				local step=P().grid.size or 8
-				x=roundToStep(x or 0, step); y=roundToStep(y or 0, step)
-			end
-			cfg.point, cfg.rel, cfg.relPoint, cfg.x, cfg.y = p,(rel and rel:GetName()) or "UIParent", rp, x or 0, y or 0
-			ApplyFrameConfig(self, cfg) -- моментально применяем, чтобы не "отпрыгивал"
-		end)
+		local m = bt:GetModule(b.module, true)
+		if m then m:ToggleModule(nil, on and true or false) end
 	end
+	local AB = Engine:GetModule("ActionBars", true)
+	if AB and AB.RaiseBars then AB:RaiseBars() end
 end
 
-------------------------------------------------------------
--- Режим перемещения (оверлеи)
-------------------------------------------------------------
-local MoveMode = false
-local Handles = {}
+-------------------------------------------------------------------------------
+-- small widget helpers
+-------------------------------------------------------------------------------
+local BACKDROP = {
+	bgFile = [[Interface\ChatFrame\ChatFrameBackground]],
+	edgeFile = path .. [[textures\DiabolicUI_Tooltip_Border.tga]],
+	edgeSize = 32, tile = false, tileSize = 0,
+	insets = { left = 23, right = 23, top = 23, bottom = 23 }
+}
 
-local function CreateHandle(targetFrame, title, onDrop)
-  local h = CreateFrame("Frame", nil, UIParent)
-  h:SetFrameStrata("TOOLTIP")
-
-  local w  = (targetFrame.GetWidth and targetFrame:GetWidth() or 100) * (targetFrame.GetScale and targetFrame:GetScale() or 1)
-  local ht = (targetFrame.GetHeight and targetFrame:GetHeight() or 40) * (targetFrame.GetScale and targetFrame:GetScale() or 1)
-  h:SetSize(math.max(40,w), math.max(20,ht))
-  h:SetPoint("CENTER", targetFrame, "CENTER")
-
-  local bg=h:CreateTexture(nil,"BACKGROUND"); bg:SetAllPoints(); bg:SetTexture("Interface\\Buttons\\WHITE8x8"); bg:SetVertexColor(1,1,1,0.08)
-  local br=h:CreateTexture(nil,"BORDER"); br:SetAllPoints(); br:SetTexture("Interface\\Buttons\\WHITE8x8"); br:SetVertexColor(1,0.82,0,0.35); br:SetBlendMode("ADD")
-  local t=h:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); t:SetText(title or ""); t:SetPoint("TOP",0,-2)
-
-  -- гарантируем, что таргет можно двигать мышью
-  if targetFrame.SetMovable then targetFrame:SetMovable(true) end
-  if targetFrame.EnableMouse then targetFrame:EnableMouse(true) end
-  if targetFrame.SetClampedToScreen then targetFrame:SetClampedToScreen(true) end
-
-  h:EnableMouse(true); h:RegisterForDrag("LeftButton")
-  h:SetScript("OnDragStart", function(self)
-    if InCombatLockdown() then return end
-    -- двигаем именно цель
-    if targetFrame.StartMoving then targetFrame:StartMoving() end
-  end)
-
-  h:SetScript("OnDragStop", function(self)
-    if targetFrame.StopMovingOrSizing then targetFrame:StopMovingOrSizing() end
-    if onDrop then onDrop(self) end
-    self:ClearAllPoints()
-    self:SetPoint("CENTER", targetFrame, "CENTER")
-  end)
-
-  h:Show()
-  return h
+local function Header(parent, text, x, y)
+	local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	fs:SetPoint("TOPLEFT", x, y)
+	fs:SetText(text)
+	fs:SetTextColor(.85, .7, .4)
+	return fs
 end
 
-local function UpdateHandles()
-	for _,list in pairs(Handles) do for _,h in ipairs(list) do if h then h:Hide() end end end
-	if not MoveMode then return end
-	for _, item in ipairs(Registry.Widgets) do
-		local frames = GetWidgetFrames(item.module, item.widget, item.get)
-		if #frames>0 then
-			local key = item.module.."|"..(item.widget or "MODULE")
-			Handles[key]=Handles[key] or {}
-			for i=#Handles[key],1,-1 do Handles[key][i]:Hide(); Handles[key][i]=nil end
-			for idx,f in ipairs(frames) do
-				local cfgKey=item.module.."||"..(item.widget or "MODULE").."||"..idx
-				local cfg=P().frames[cfgKey] or {}; P().frames[cfgKey]=cfg
-				if not cfg.point then
-					local p,rn,rp,x,y=ReadPoint(f)
-					cfg.point, cfg.rel, cfg.relPoint, cfg.x, cfg.y = p,rn,rp,x,y
-					cfg.scale=cfg.scale or (call(f,"GetScale") or 1.0)
-					cfg.locked = not not cfg.locked
-				end
-				ApplyFrameConfig(f,cfg)
-				local title=(item.title or (item.module.." / "..(item.widget or "Module"))).." ["..idx.."]"
-				local handle=CreateHandle(f,title,function()
-					local p, rel, rp, x, y = f:GetPoint()
-					if P().grid.enabled then local step=P().grid.size or 8; x=roundToStep(x or 0,step); y=roundToStep(y or 0,step) end
-					cfg.point, cfg.rel, cfg.relPoint, cfg.x, cfg.y = p,(rel and rel:GetName()) or "UIParent", rp, x or 0, y or 0
-					ApplyFrameConfig(f,cfg)
-				end)
-				table.insert(Handles[key], handle)
-			end
-		end
-	end
-end
-
-SLASH_DIO_MOVE1="/diomove"
-SlashCmdList["DIO_MOVE"]=function()
-  if InCombatLockdown() then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000DiabolicUI:|r Нельзя включить режим переноса в бою.")
-    return
-  end
-  MoveMode = not MoveMode
-  DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00DiabolicUI:|r Move Mode " .. (MoveMode and "|cffffff00ON|r" or "|cffff0000OFF|r"))
-  UpdateHandles()
-  UpdateGridOverlay()
-end
-
-local combatEv = CreateFrame("Frame")
-combatEv:RegisterEvent("PLAYER_REGEN_ENABLED")
-combatEv:SetScript("OnEvent", function()
-  if MoveMode then
-    UpdateHandles()
-    UpdateGridOverlay()
-  end
-end)
-
-------------------------------------------------------------
--- GUI: панель в Интерфейсе (с вкладками и прокруткой)
-------------------------------------------------------------
-local function MakeButton(parent,text,cb,w,h)
-	local b=CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-	b:SetText(text or ""); b:SetWidth(w or 140); b:SetHeight(h or 22)
-	if cb then b:SetScript("OnClick", cb) end
-	return b
-end
-
-local function MakeCheck(parent,label,onClick)
-	local b=CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-	local name=b:GetName(); local txt=name and _G[name.."Text"]
-	if not txt then txt=parent:CreateFontString(nil,"ARTWORK","GameFontHighlight"); txt:SetPoint("LEFT", b, "RIGHT", 2, 0) end
-	b.text=txt; b.text:SetText(label or "")
-	if onClick then b:SetScript("OnClick", function(self) onClick(self:GetChecked()) end) end
-	return b
-end
-
-local function MakeSlider(parent,label,minV,maxV,step,onVal)
-	local s=CreateFrame("Slider", nil, parent, "OptionsSliderTemplate")
-	s:SetWidth(220)
-	local Lbl=parent:CreateFontString(nil,"ARTWORK","GameFontNormal"); Lbl:SetText(label or ""); Lbl:SetPoint("BOTTOM", s, "TOP", 0, 2); s.label=Lbl
-	s:SetMinMaxValues(minV or 0, maxV or 100); if s.SetValueStep then s:SetValueStep(step or 1) end
-	local snapping=false
-	s:SetScript("OnValueChanged", function(self,val)
-		local mn,mx=self:GetMinMaxValues(); local st=step or 1
-		local snap=mn+math.floor(((val-mn)/st)+0.5)*st; if snap<mn then snap=mn elseif snap>mx then snap=mx end
-		if snap~=val then if not snapping then snapping=true; self:SetValue(snap); snapping=false end; val=snap end
-		if onVal then onVal(val) end
+local function Check(parent, text, x, y, get, set)
+	local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+	cb:SetSize(24, 24)
+	cb:SetPoint("TOPLEFT", x, y)
+	local label = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	label:SetPoint("LEFT", cb, "RIGHT", 2, 1)
+	label:SetText(text)
+	cb.refresh = function() cb:SetChecked(get() and true or false) end
+	cb:SetScript("OnClick", function(self)
+		set(self:GetChecked() and true or false)
+		self.refresh()
 	end)
-	return s
+	return cb
 end
 
--- сама панель
-local Panel=CreateFrame("Frame","DiabolicUI_OptionsPanel",UIParent)
-Panel.name="DiabolicUI"
-InterfaceOptions_AddCategory(Panel)
-
--- Вкладки
-local Tabs = CreateFrame("Frame", nil, Panel)
-Tabs:SetPoint("TOPLEFT", 16, -16)
-Tabs:SetSize(400, 24)
-
-local TabMain = CreateFrame("Button", nil, Tabs, "UIPanelButtonTemplate")
-TabMain:SetText("Основные"); TabMain:SetSize(120, 22)
-TabMain:SetPoint("TOPLEFT")
-
-local TabAdv  = CreateFrame("Button", nil, Tabs, "UIPanelButtonTemplate")
-TabAdv:SetText("Дополнительно"); TabAdv:SetSize(140, 22)
-TabAdv:SetPoint("LEFT", TabMain, "RIGHT", 6, 0)
-
--- Подстраницы
-local PageMain = CreateFrame("Frame", nil, Panel)
-PageMain:SetPoint("TOPLEFT", 16, -48)
-PageMain:SetPoint("BOTTOMRIGHT", -36, 16)
-
-local PageAdv  = CreateFrame("Frame", nil, Panel)
-PageAdv:SetPoint("TOPLEFT", 16, -48)
-PageAdv:SetPoint("BOTTOMRIGHT", -36, 16)
-PageAdv:Hide()
-
--- Прокрутка на обеих страницах
-local function MakeScroll(parent, globalName)
-  if not globalName then
-    local base = (parent:GetName() or "DiabolicUI") .. "_Scroll"
-    local i=1
-    while _G[base..i] do i=i+1 end
-    globalName = base..i
-  end
-  local sf = CreateFrame("ScrollFrame", globalName, parent, "UIPanelScrollFrameTemplate")
-  sf:SetPoint("TOPLEFT", 0, 0)
-  sf:SetPoint("BOTTOMRIGHT", 0, 0)
-  local content = CreateFrame("Frame", globalName.."_Content", sf)
-  content:SetSize(1,1)
-  sf:SetScrollChild(content)
-  return sf, content
+local function Button(parent, text, x, y, w, onclick)
+	local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+	b:SetSize(w or 150, 22)
+	b:SetPoint("TOPLEFT", x, y)
+	b:SetText(text)
+	b:SetScript("OnClick", onclick)
+	return b
 end
 
-local SMain, CMain = MakeScroll(PageMain, "DiabolicUI_OptionsMainScroll")
-local SAdv,  CAdv  = MakeScroll(PageAdv,  "DiabolicUI_OptionsAdvScroll")
+-------------------------------------------------------------------------------
+-- menu
+-------------------------------------------------------------------------------
+Module.CreateMenu = function(self)
+	if self.frame then return self.frame end
+	local f = CreateFrame("Frame", "DiabolicUIOptionsFrame", UIParent)
+	f:SetSize(640, 560)
+	f:SetPoint("CENTER")
+	f:SetFrameStrata("DIALOG")
+	f:SetBackdrop(BACKDROP)
+	f:SetBackdropColor(0, 0, 0, .9)
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:SetClampedToScreen(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f:Hide()
+	tinsert(UISpecialFrames, "DiabolicUIOptionsFrame")
 
--- переключение вкладок
-local function ShowMain() PageMain:Show(); PageAdv:Hide() end
-local function ShowAdv()  PageMain:Hide(); PageAdv:Show() end
-TabMain:SetScript("OnClick", ShowMain)
-TabAdv:SetScript("OnClick",  ShowAdv)
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+	title:SetPoint("TOP", 0, -28)
+	title:SetText("|cff8a0707Diabolic|r|cffffffffUI|r")
 
--- --------- Содержимое "Основные"
-local y = 6
+	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	close:SetPoint("TOPRIGHT", -18, -18)
 
-local title=CMain:CreateFontString(nil,"ARTWORK","GameFontNormalLarge")
-title:SetPoint("TOPLEFT",6,-y); title:SetText("DiabolicUI — Настройки")
-y = y + 24
+	f.checks = {}
+	local L, R = 34, 340
 
-local btnMove=MakeButton(CMain,"Режим перемещения (/diomove)", function() SlashCmdList["DIO_MOVE"]() end, 240)
-btnMove:SetPoint("TOPLEFT", 6, -y)
+	-- left column: action bars
+	Header(f, "Панели команд", L, -64)
+	Button(f, "Разблокировать / закрепить", L, -92, 190, function() self:ToggleLock() end)
+	Button(f, "Назначить клавиши", L + 196, -92, 100, function() self:KeyBindMode() end)
+	Button(f, "Все настройки панелей…", L, -118, 190, function()
+		f:Hide()
+		local AB = Engine:GetModule("ActionBars", true)
+		if AB then AB:OpenBarOptions() end
+	end)
+	Button(f, "Сбросить", L + 196, -118, 100, function()
+		local AB = Engine:GetModule("ActionBars", true)
+		if AB then AB:ApplyDefaultLayout() end
+		self:Refresh()
+	end)
 
-local btnApply=MakeButton(CMain,"Применить", function()
-	for _, item in ipairs(Registry.Widgets) do
-		local frames=GetWidgetFrames(item.module,item.widget,item.get)
-		for idx,f in ipairs(frames) do
-			local key=item.module.."||"..(item.widget or "MODULE").."||"..idx
-			local cfg=P().frames[key]; if cfg then ApplyFrameConfig(f,cfg) end
-		end
-	end
-	UpdateHandles(); UpdateGridOverlay()
-end, 120)
-btnApply:SetPoint("LEFT", btnMove, "RIGHT", 8, 0)
-
-local btnReset=MakeButton(CMain,"Сброс профиля", function()
-	local name=ActiveProfileName()
-	DiabolicUI_OptionsDB.profiles[name]={ frames={}, modules={}, grid={enabled=false,size=8,show=false} }
-	UpdateGridOverlay()
-end, 140)
-btnReset:SetPoint("LEFT", btnApply, "RIGHT", 8, 0)
-y = y + 30
-
--- Профили
-local profLabel=CMain:CreateFontString(nil,"ARTWORK","GameFontNormal")
-profLabel:SetPoint("TOPLEFT", 6, -y); profLabel:SetText("Профили")
-y = y + 22
-
-local profEdit=CreateFrame("EditBox", nil, CMain, "InputBoxTemplate")
-profEdit:SetAutoFocus(false); profEdit:SetSize(180,20); profEdit:SetPoint("TOPLEFT", 6, -y)
-
-local btnProfSet=MakeButton(CMain,"Создать/Активировать", function()
-	local name=profEdit:GetText(); if not name or name=="" then return end
-	EnsureProfile(name)
-	DiabolicUI_OptionsDB.perChar[PerCharKey()] = DiabolicUI_OptionsDB.perChar[PerCharKey()] or {}
-	DiabolicUI_OptionsDB.perChar[PerCharKey()].activeProfile=name
-	UpdateGridOverlay()
-end, 180)
-btnProfSet:SetPoint("LEFT", profEdit, "RIGHT", 6, 0)
-
-local btnProfDel=MakeButton(CMain,"Удалить", function()
-	local name=profEdit:GetText(); if not name or name=="" then return end
-	if name==ActiveProfileName() then DEFAULT_CHAT_FRAME:AddMessage("|cffff0000Нельзя удалить активный профиль|r"); return end
-	DiabolicUI_OptionsDB.profiles[name]=nil
-end, 100)
-btnProfDel:SetPoint("LEFT", btnProfSet, "RIGHT", 6, 0)
-y = y + 36
-
--- Импорт/Экспорт
-local ieLabel=CMain:CreateFontString(nil,"ARTWORK","GameFontNormal")
-ieLabel:SetPoint("TOPLEFT", 6, -y); ieLabel:SetText("Импорт / Экспорт:")
-y = y + 18
-
-local box=CreateFrame("Frame", nil, CMain, "OptionsBoxTemplate")
-box:SetPoint("TOPLEFT", 6, -y); box:SetSize(520, 120)
-
-local scrollIE = CreateFrame("ScrollFrame", "DiabolicUI_OptionsIE_Scroll", box, "UIPanelScrollFrameTemplate")
-scrollIE:SetPoint("TOPLEFT",4,-6); scrollIE:SetPoint("BOTTOMRIGHT",-28,6)
-local ieEdit   = CreateFrame("EditBox", "DiabolicUI_OptionsIE_Edit", scrollIE)
-ieEdit:SetMultiLine(true); ieEdit:SetAutoFocus(false); ieEdit:SetFontObject(ChatFontNormal); ieEdit:SetWidth(480)
-scrollIE:SetScrollChild(ieEdit)
-
-local function Serialize(tbl, indent)
-	indent=indent or ""; local out={"{"}; local first=true
-	for k,v in pairs(tbl) do
-		if not first then table.insert(out,",") end; first=false
-		local key=(type(k)=="string" and k:match("^[%a_][%w_]*$")) and k or ("["..string.format("%q",k).."]")
-		local vt=type(v); local val
-		if vt=="table" then val=Serialize(v, indent.."  ")
-		elseif vt=="string" then val=string.format("%q", v)
-		elseif vt=="number" or vt=="boolean" then val=tostring(v)
-		else val="nil" end
-		table.insert(out, "\n"..indent.."  "..key.."="..val)
-	end
-	table.insert(out, "\n"..indent.."}"); return table.concat(out,"")
-end
-local function Deserialize(str)
-	if not str or str=="" then return nil,"empty" end
-	local chunk,err=loadstring("return "..str); if not chunk then return nil,err end
-	local ok,tbl=pcall(chunk); if not ok then return nil,tbl end
-	if type(tbl)~="table" then return nil,"not a table" end
-	return tbl
-end
-
-local btnExport=MakeButton(CMain,"Экспорт", function() ieEdit:SetText(Serialize(P())); ieEdit:HighlightText() end)
-btnExport:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -6)
-
-local btnImport=MakeButton(CMain,"Импорт (заменить активный)", function()
-	local tbl,err=Deserialize(ieEdit:GetText())
-	if not tbl then DEFAULT_CHAT_FRAME:AddMessage("|cffff0000Импорт не удался:|r "..tostring(err)); return end
-	DiabolicUI_OptionsDB.profiles[ActiveProfileName()] = tbl; UpdateGridOverlay()
-end)
-btnImport:SetPoint("LEFT", btnExport, "RIGHT", 8, 0)
-y = y + 120 + 12 + 26
-
--- Модули (вкл/выкл)
-local modLabel=CMain:CreateFontString(nil,"ARTWORK","GameFontNormal")
-modLabel:SetPoint("TOPLEFT", 6, -y); modLabel:SetText("Модули:")
-y = y + 22
-
-local xOff = 6
-for _, modName in ipairs(Registry.Modules) do
-	local mod=Engine:GetModule(modName, true)
-	if mod then
-		local chk=MakeCheck(CMain, modName, function(val)
-			local prof=P(); prof.modules[modName]=not not val
-			if val then mod:Enable() else mod:Disable() end
+	local rowsLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	rowsLabel:SetPoint("TOPLEFT", L + 4, -152)
+	rowsLabel:SetText("Рядов внизу:")
+	for i = 1, 3 do
+		local b = Button(f, tostring(i), L + 90 + (i - 1) * 36, -146, 32, function()
+			local AB = Engine:GetModule("ActionBars", true)
+			if AB then AB:SetNumBottomRows(i) end
+			self:Refresh()
 		end)
-		chk:SetPoint("TOPLEFT", xOff, -y)
-		local initial=P().modules[modName]; if initial==nil then initial=true end
-		chk:SetChecked(initial)
-
-		xOff = xOff + 160
-		if xOff > 480 then xOff=6; y=y+26 end
 	end
-end
-y = y + 30
 
--- Список элементов с прокруткой
-local elemsLabel=CMain:CreateFontString(nil,"ARTWORK","GameFontNormal")
-elemsLabel:SetPoint("TOPLEFT", 6, -y); elemsLabel:SetText("Элементы (позиция/масштаб/замок):")
-y = y + 20
-
-local ListBox = CreateFrame("Frame", "DiabolicUI_OptionsMain_ListBox", CMain, "OptionsBoxTemplate")
-ListBox:SetPoint("TOPLEFT", 6, -y); ListBox:SetSize(620, 220)
-
-local ListScroll = CreateFrame("ScrollFrame", "DiabolicUI_OptionsMain_ListScroll", ListBox, "UIPanelScrollFrameTemplate")
-ListScroll:SetPoint("TOPLEFT", 4, -6); ListScroll:SetPoint("BOTTOMRIGHT", -28, 6)
-
-local ListContent = CreateFrame("Frame", "DiabolicUI_OptionsMain_ListScrollContent", ListScroll)
-ListContent:SetSize(1,1)
-ListScroll:SetScrollChild(ListContent)
-
-local function stepForNudge() return P().grid.enabled and (P().grid.size or 8) or 1 end
-
-local function DrawRows(parent)
-	local oy=0
-	for _,item in ipairs(Registry.Widgets) do
-		local frames=GetWidgetFrames(item.module, item.widget, item.get)
-		if #frames>0 then
-			for idx,f in ipairs(frames) do
-				local row=CreateFrame("Frame", nil, parent); row:SetSize(580,48)
-				row:SetPoint("TOPLEFT", 0, -oy); oy = oy + 50
-
-				local name=(item.title or (item.module.." / "..(item.widget or "Module"))).." ["..idx.."]"
-				local label=row:CreateFontString(nil,"ARTWORK","GameFontHighlight")
-				label:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -2); label:SetText(name)
-
-				local key=item.module.."||"..(item.widget or "MODULE").."||"..idx
-				local cfg=P().frames[key] or {}; P().frames[key]=cfg
-				if not cfg.point then
-					local p,rn,rp,x,y=ReadPoint(f)
-					cfg.point,cfg.rel,cfg.relPoint,cfg.x,cfg.y=p,rn,rp,x,y
-					cfg.scale=cfg.scale or (call(f,"GetScale") or 1.0)
-					cfg.locked = not not cfg.locked
-				end
-
-				local chk=MakeCheck(row,"Lock", function(v) cfg.locked=not not v; ApplyFrameConfig(f,cfg) end)
-				chk:SetPoint("TOPLEFT", label, "BOTTOMLEFT", -2, -2); chk:SetChecked(cfg.locked)
-
-				local s=MakeSlider(row, "Scale", 0.5, 2.0, 0.01, function(v)
-					cfg.scale=tonumber(string.format("%.2f",v)) or 1.0; ApplyFrameConfig(f,cfg)
-				end)
-				s:SetPoint("TOPLEFT", chk, "BOTTOMLEFT", 0, -8); s:SetValue(cfg.scale or 1.0)
-
-				local bU=MakeButton(row,"▲", function() local st=stepForNudge(); cfg.y=(cfg.y or 0)+st; ApplyFrameConfig(f,cfg) end, 24, 20)
-				bU:SetPoint("LEFT", s, "RIGHT", 8, 0)
-				local bD=MakeButton(row,"▼", function() local st=stepForNudge(); cfg.y=(cfg.y or 0)-st; ApplyFrameConfig(f,cfg) end, 24, 20)
-				bD:SetPoint("LEFT", bU, "RIGHT", 2, 0)
-				local bL=MakeButton(row,"◄", function() local st=stepForNudge(); cfg.x=(cfg.x or 0)-st; ApplyFrameConfig(f,cfg) end, 24, 20)
-				bL:SetPoint("LEFT", bD, "RIGHT", 2, 0)
-				local bR=MakeButton(row,"►", function() local st=stepForNudge(); cfg.x=(cfg.x or 0)+st; ApplyFrameConfig(f,cfg) end, 24, 20)
-				bR:SetPoint("LEFT", bL, "RIGHT", 2, 0)
-			end
-		end
+	local y = -176
+	for _, b in ipairs(Bars) do
+		f.checks[#f.checks + 1] = Check(f, b.title, L, y, function() return BarEnabled(b) end, function(v) SetBarEnabled(b, v) end)
+		y = y - 24
 	end
-	parent:SetHeight(oy+6)
+	f.checks[#f.checks + 1] = Check(f, "Подложка (демон, ангел, череп)", L, y,
+		function() local AB = Engine:GetModule("ActionBars", true); return AB and AB.db.show_artwork ~= false end,
+		function(v) local AB = Engine:GetModule("ActionBars", true); if AB then AB.db.show_artwork = v; AB:UpdateArtwork() end end)
+
+	-- right column: elements
+	Header(f, "Элементы интерфейса", R, -64)
+	y = -92
+	for _, e in ipairs(Elements) do
+		f.checks[#f.checks + 1] = Check(f, e.title, R, y,
+			function() return not CharDB().hidden[e.key] end,
+			function(v) self:SetElementHidden(e.key, not v) end)
+		y = y - 24
+	end
+
+	-- enemies
+	y = y - 8
+	Header(f, "Полоски врагов", R, y)
+	y = y - 26
+	local NP = Engine:GetModule("NamePlates", true)
+	local modes = {
+		{ "normal", "Над моделью (боссы и элиты — сверху)" },
+		{ "all", "Над моделью для всех врагов" },
+		{ "top", "Только сверху (как раньше)" },
+	}
+	f.radios = {}
+	for _, m in ipairs(modes) do
+		local r = CreateFrame("CheckButton", nil, f, "UIRadioButtonTemplate")
+		r:SetPoint("TOPLEFT", R + 4, y)
+		local label = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("LEFT", r, "RIGHT", 4, 0)
+		label:SetText(m[2])
+		r.mode = m[1]
+		r:SetScript("OnClick", function()
+			if NP then NP:SetEnemyMode(m[1]) end
+			self:Refresh()
+		end)
+		f.radios[#f.radios + 1] = r
+		y = y - 20
+	end
+	if NP then
+		f.checks[#f.checks + 1] = Check(f, "Мои дебаффы над полоской цели", R, y - 4,
+			function() return NP.db and NP.db.showDebuffs end,
+			function(v) NP.db.showDebuffs = v end)
+	end
+
+	-- footer: error log
+	f.errors = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	f.errors:SetPoint("BOTTOMLEFT", 36, 34)
+	Button(f, "Журнал ошибок", 440, -(560 - 56), 160, function() self:PrintErrors() end)
+
+	self.frame = f
+	f:SetScript("OnShow", function() self:Refresh() end)
+	return f
 end
 
-DrawRows(ListContent)
-y = y + 220 + 16
-CMain:SetHeight(y)
-
--- --------- Содержимое "Дополнительно" (сетка)
-local yy = 6
-local gridTitle=CAdv:CreateFontString(nil,"ARTWORK","GameFontNormalLarge")
-gridTitle:SetPoint("TOPLEFT",6,-yy); gridTitle:SetText("Дополнительно")
-yy = yy + 26
-
-local gridLabel=CAdv:CreateFontString(nil,"ARTWORK","GameFontNormal")
-gridLabel:SetPoint("TOPLEFT", 6, -yy); gridLabel:SetText("Сетка (snap‑to‑grid)")
-yy = yy + 20
-
-local chkSnap=MakeCheck(CAdv,"Snap to grid", function(v) P().grid.enabled = not not v end)
-chkSnap:SetPoint("TOPLEFT", 6, -yy)
-
-local sGrid=MakeSlider(CAdv,"Размер сетки (px)",2,64,1, function(val)
-	P().grid.size = math.floor(val+0.5); UpdateGridOverlay()
-end)
-sGrid:SetPoint("TOPLEFT", chkSnap, "BOTTOMLEFT", 0, -12)
-
-local chkShowGrid=MakeCheck(CAdv,"Показывать сетку", function(v) P().grid.show = not not v; UpdateGridOverlay() end)
-chkShowGrid:SetPoint("LEFT", sGrid, "RIGHT", 16, -12)
-yy = yy + 80
-
-local note=CAdv:CreateFontString(nil,"ARTWORK","GameFontHighlightSmall")
-note:SetPoint("TOPLEFT", 6, -yy)
-note:SetText("Примечание: сетка влияет только на сохранение позиции при отпускании фрейма.\nРежим переноса: /diomove или кнопка у миникарты (ПКМ).")
-yy = yy + 36
-
-CAdv:SetHeight(yy)
-
--- Заполнение актуальными значениями при открытии панели
-Panel:SetScript("OnShow", function()
-	for _,mName in ipairs(Registry.Modules) do
-		local m=Engine:GetModule(mName, true)
-		if m then
-			local st=P().modules[mName]; if st==nil then st=true end
-			if st then m:Enable() else m:Disable() end
-		end
-	end
-	chkSnap:SetChecked(P().grid.enabled)
-	sGrid:SetValue(P().grid.size or 8)
-	chkShowGrid:SetChecked(P().grid.show)
-	UpdateGridOverlay()
-end)
-
--- Открытие панели слэшем
-SLASH_DIO_UI1="/dioui"
-SlashCmdList["DIO_UI"]=function()
-	InterfaceOptionsFrame_OpenToCategory(Panel)
-	InterfaceOptionsFrame_OpenToCategory(Panel) -- LK баг
+Module.Refresh = function(self)
+	local f = self.frame
+	if not f then return end
+	for _, cb in ipairs(f.checks) do cb.refresh() end
+	local NP = Engine:GetModule("NamePlates", true)
+	local mode = NP and NP.db and NP.db.enemyMode or "normal"
+	for _, r in ipairs(f.radios) do r:SetChecked(r.mode == mode) end
+	local n = #(DiabolicUI_GetErrorLog and DiabolicUI_GetErrorLog() or {})
+	f.errors:SetText(n > 0 and ("Ошибок в журнале: %d (/dui errors)"):format(n) or "Ошибок нет")
 end
 
--- Автоприменение позиций после входа
-local ev=CreateFrame("Frame"); ev:RegisterEvent("PLAYER_LOGIN")
-ev:SetScript("OnEvent", function()
-	for _, item in ipairs(Registry.Widgets) do
-		local frames=GetWidgetFrames(item.module,item.widget,item.get)
-		for idx,f in ipairs(frames) do
-			local key=item.module.."||"..(item.widget or "MODULE").."||"..idx
-			local cfg=P().frames[key]; if cfg then ApplyFrameConfig(f,cfg) end
-		end
+Module.Toggle = function(self)
+	local f = self:CreateMenu()
+	if f:IsShown() then f:Hide() else f:Show() end
+end
+
+Module.ToggleLock = function(self)
+	if InCombatLockdown() then return Print("нельзя в бою.") end
+	local AB = Engine:GetModule("ActionBars", true)
+	if AB then AB:ToggleBarLock() end
+	if self.frame then self.frame:Hide() end
+end
+
+Module.KeyBindMode = function(self)
+	local KB = LibStub and LibStub("LibKeyBound-1.0", true)
+	if KB then
+		if self.frame then self.frame:Hide() end
+		KB:Toggle()
 	end
-	UpdateGridOverlay()
-end)
+end
 
-------------------------------------------------------------
--- Кнопка у миникарты (иконка аддона) — с защитой от дублей
-------------------------------------------------------------
-do
-	-- per-char мини‑настройки
-	local pc = DiabolicUI_OptionsDB.perChar
-	local key= PerCharKey()
-	pc[key] = pc[key] or {}
-	pc[key].mini = pc[key].mini or { angle = 210, radius = 78, hide = false }
-	local C = pc[key].mini
-
-	-- либо переиспользуем существующую, либо создаём
-	local btn = _G.DiabolicUI_MinimapButton
-	if not btn then
-		btn = CreateFrame("Button", "DiabolicUI_MinimapButton", Minimap)
-		btn:SetSize(31,31) btn:SetFrameStrata("MEDIUM") btn:SetFrameLevel(8)
-
-		local border = btn:CreateTexture(nil,"OVERLAY")
-		border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-		border:SetSize(54,54) border:SetPoint("TOPLEFT")
-
-		local icon = btn:CreateTexture(nil,"ARTWORK")
-		icon:SetTexture("Interface\\AddOns\\DiabolicUI\\media\\textures\\cogs")
-		icon:SetSize(20,20) icon:SetPoint("CENTER")
-
-		btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
+Module.PrintErrors = function(self, clear)
+	local log = DiabolicUI_GetErrorLog and DiabolicUI_GetErrorLog() or {}
+	if clear then
+		wipe(log)
+		Print("журнал ошибок очищен.")
+		return self:Refresh()
 	end
-
-	local function Place(b)
-		local a = math.rad(C.angle or 210)
-		local x = math.cos(a) * (C.radius or 78)
-		local y = math.sin(a) * (C.radius or 78)
-		b:ClearAllPoints(); b:SetPoint("CENTER", Minimap, "CENTER", x, y)
+	if #log == 0 then return Print("ошибок нет.") end
+	Print(("ошибок: %d (полностью — в WTF\\...\\SavedVariables\\DiabolicUI.lua)"):format(#log))
+	for i = math.max(1, #log - 9), #log do
+		local e = log[i]
+		DEFAULT_CHAT_FRAME:AddMessage(("|cffff5555%d.|r [x%d] %s"):format(i, e.count or 1, e.msg))
 	end
+end
 
-	btn:RegisterForClicks("AnyUp")
-	btn:SetScript("OnClick", function(self, button)
-		if button == "LeftButton" then
-			InterfaceOptionsFrame_OpenToCategory(Panel)
-			InterfaceOptionsFrame_OpenToCategory(Panel)
+-------------------------------------------------------------------------------
+-- Blizzard Interface Options entry
+-------------------------------------------------------------------------------
+Module.CreateBlizzardPanel = function(self)
+	local panel = CreateFrame("Frame")
+	panel.name = "DiabolicUI"
+	local t = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	t:SetPoint("TOPLEFT", 16, -16)
+	t:SetText("|cff8a0707Diabolic|r|cffffffffUI|r — Diablo-WoW")
+	local d = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	d:SetPoint("TOPLEFT", t, "BOTTOMLEFT", 0, -10)
+	d:SetWidth(560)
+	d:SetJustifyH("LEFT")
+	d:SetText("Все настройки интерфейса открываются командой |cffffd100/dui|r или кнопкой ниже.")
+	local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+	b:SetSize(200, 24)
+	b:SetPoint("TOPLEFT", d, "BOTTOMLEFT", 0, -14)
+	b:SetText("Открыть настройки DiabolicUI")
+	b:SetScript("OnClick", function()
+		if InterfaceOptionsFrame then InterfaceOptionsFrame:Hide() end
+		HideUIPanel(GameMenuFrame)
+		self:Toggle()
+	end)
+	InterfaceOptions_AddCategory(panel)
+end
+
+-------------------------------------------------------------------------------
+-- module
+-------------------------------------------------------------------------------
+Module.OnInit = function(self)
+	CharDB()
+end
+
+Module.OnEnable = function(self)
+	SLASH_DIABOLICUIOPTIONS1 = "/dui"
+	SLASH_DIABOLICUIOPTIONS2 = "/диабло"
+	SlashCmdList["DIABOLICUIOPTIONS"] = function(msg)
+		msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+		if msg == "lock" or msg == "unlock" then
+			self:ToggleLock()
+		elseif msg == "kb" or msg == "bind" then
+			self:KeyBindMode()
+		elseif msg == "reset" then
+			local AB = Engine:GetModule("ActionBars", true)
+			if AB then AB:ApplyDefaultLayout() end
+		elseif msg == "errors" then
+			self:PrintErrors()
+		elseif msg == "errors clear" then
+			self:PrintErrors(true)
 		else
-			SlashCmdList["DIO_MOVE"]()
+			self:Toggle()
 		end
-	end)
-	btn:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-		GameTooltip:AddLine("|cffffcc00DiabolicUI|r")
-		GameTooltip:AddLine("ЛКМ: открыть настройки", 0,.8,0)
-		GameTooltip:AddLine("ПКМ: режим перемещения", 0,.8,0)
-		GameTooltip:Show()
-	end)
-	btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-	-- перетаскивание по окружности
-	btn:SetMovable(true) btn:RegisterForDrag("LeftButton")
-	btn:SetScript("OnDragStart", function(self) self:StartMoving() end)
-	btn:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		local mx,my = Minimap:GetCenter()
-	 local bx,by = self:GetCenter()
-	 local s = Minimap:GetEffectiveScale()/UIParent:GetEffectiveScale()
-		mx,my,bx,by = mx*s,my*s,bx*s,by*s
-		local ang = math.deg(math.atan2(by - my, bx - mx)); if ang < 0 then ang = ang + 360 end
-		C.angle = math.floor(ang + 0.5)
-		Place(self)
-	end)
-
-	btn:SetScript("OnShow", function(self) Place(self) end)
-	if C.hide then btn:Hide() else Place(btn) end
-
-	SLASH_DIO_MB1="/diomb"
-	SlashCmdList.DIO_MB=function()
-		if btn:IsShown() then C.hide=true; btn:Hide() else C.hide=false; btn:Show(); Place(btn) end
 	end
+	self:CreateBlizzardPanel()
+	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
+	self:RegisterEvent("PLAYER_REGEN_ENABLED", "OnRegenEnabled")
 end
 
-------------------------------------------------------------
--- Экспорт полезных функций
-------------------------------------------------------------
-Options.GetProfile   = P
-Options.ApplyFrame   = ApplyFrameConfig
-Options.UpdateGrid   = UpdateGridOverlay
-Options.ToggleMove   = function() SlashCmdList["DIO_MOVE"]() end
-Options.ActiveProfileName = ActiveProfileName
+Module.OnEnteringWorld = function(self)
+	self:UnregisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
+	self:ApplyAllElements()
+end
+
+Module.OnRegenEnabled = function(self)
+	if pendingApply then
+		pendingApply = nil
+		self:ApplyAllElements()
+		-- un-hide requests made in combat
+		local hidden = CharDB().hidden
+		for _, e in ipairs(Elements) do
+			if not hidden[e.key] then ApplyElement(e, false) end
+		end
+	end
+end

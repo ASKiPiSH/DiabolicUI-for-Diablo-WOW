@@ -1,10 +1,10 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
 
+<!-- host module: artwork, anchors, default layout for the embedded DiabolicBars -->
 <Script file='actionbars.lua'/>
-
-<Include file='templates\templates.xml'/>
-<Include file='controllers\controllers.xml'/>
-<Include file='bars\bars.xml'/>
-<Include file='menus\menus.xml'/>
+<!-- DiabolicUI border skin for DiabolicBars buttons -->
+<Script file='skin.lua'/>
+<!-- DiabolicUI XP bar (and Diablo-WoW paragon bar slot) -->
+<Script file='bars\bar_xp_rep.lua'/>
 
 </Ui>

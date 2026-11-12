@@ -1,0 +1,54 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+	<!--
+		DiabolicBars = Bartender4 4.4.2 (WotLK 3.3.5a), embedded into DiabolicUI.
+		Renamed Bartender4 -> DiabolicBars and BT4 -> DBT so it never clashes
+		with a standalone Bartender4 install. Skin and default layout come from
+		modules\actionbars\actionbars.lua (DiabolicUI host module).
+	-->
+
+	<!-- libraries (LibStub-versioned, safe to share with other addons) -->
+	<Script file="libs\LibStub\LibStub.lua"/>
+	<Include file="libs\CallbackHandler-1.0\CallbackHandler-1.0.xml"/>
+	<Script file="libs\LibDataBroker-1.1.lua"/>
+	<Include file="libs\AceAddon-3.0\AceAddon-3.0.xml"/>
+	<Include file="libs\AceDB-3.0\AceDB-3.0.xml"/>
+	<Include file="libs\AceDBOptions-3.0\AceDBOptions-3.0.xml"/>
+	<Include file="libs\AceEvent-3.0\AceEvent-3.0.xml"/>
+	<Include file="libs\AceConsole-3.0\AceConsole-3.0.xml"/>
+	<Include file="libs\AceHook-3.0\AceHook-3.0.xml"/>
+	<Include file="libs\AceLocale-3.0\AceLocale-3.0.xml"/>
+	<Include file="libs\AceGUI-3.0\AceGUI-3.0.xml"/>
+	<Include file="libs\AceConfig-3.0\AceConfig-3.0.xml"/>
+	<Include file="libs\LibKeyBound-1.0\lib.xml"/>
+	<Script file="libs\LibDBIcon-1.0\LibDBIcon-1.0.lua"/>
+	<Script file="libs\LibWindow-1.1\LibWindow-1.1.lua"/>
+	<Script file="libs\SimpleSticky.lua"/>
+
+	<Include file="locale\locale.xml"/>
+
+	<!-- core -->
+	<Script file="DiabolicBars.lua"/>
+
+	<!-- prototypes -->
+	<Script file="Bar.lua"/>
+	<Script file="ButtonBar.lua"/>
+	<Script file="StateBar.lua"/>
+	<Script file="ActionBar.lua"/>
+
+	<!-- buttons -->
+	<Script file="ActionButton.lua"/>
+	<Script file="PetButton.lua"/>
+
+	<!-- modules -->
+	<Script file="ActionBars.lua"/>
+	<Script file="BagBar.lua"/>
+	<Script file="PetBar.lua"/>
+	<Script file="StanceBar.lua"/>
+	<Script file="MicroMenu.lua"/>
+	<Script file="RepXPBar.lua"/>
+	<Script file="VehicleBar.lua"/>
+	<Script file="MultiCastBar.lua"/>
+
+	<!-- options (AceConfig, opened with /dbars or from the DiabolicUI menu) -->
+	<Include file="Options\Options.xml"/>
+</Ui>

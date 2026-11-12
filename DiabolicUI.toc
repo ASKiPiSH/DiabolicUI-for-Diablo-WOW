@@ -1,16 +1,18 @@
-﻿## Interface: 70000
+﻿## Interface: 30300
 ## Name: DiabolicUI
-## Title: |cff8a0707Diabolic|r|cffffffffUI|r |cff666666(WoW 3.3.5a - 7.0.3)|r
-## Notes: |cff666666By Lars Norberg|r |n|n|cff4488ffPayPal|r|cffffffff:|r |n|cfffffffflars@larsnorbergofficial.com|r |n|n|cff4488ffPayPal.Me|r|cffffffff:|r|n|cffffffffwww.paypal.me/larsnorberg|r
-## Author: Lars Norberg
-## Version: 1.0
+## Title: |cff8a0707Diabolic|r|cffffffffUI|r |cff666666(Diablo-WoW 3.3.5a)|r
+## Notes: Diablo-style UI for Diablo-WoW. Action bars powered by Bartender4.|n|cff666666DiabolicUI by Lars Norberg, Bartender4 by Nevcairiel.|r
+## Notes-ruRU: Интерфейс в стиле Diablo для Diablo-WoW. Панели команд на базе Bartender4.|n|cff666666DiabolicUI — Lars Norberg, Bartender4 — Nevcairiel.|r
+## Author: Lars Norberg, Nevcairiel, Diablo-WoW team
+## Version: 2.0.0-diablowow
 ## DefaultState: Enabled
-## SavedVariables: DiabolicUI_DB
-## X-eMail: lars@larsnorbergofficial.com
-## X-Website: http://www.larsnorbergofficial.com
-## X-Donate: PayPal:lars@larsnorbergofficial.com
-## X-License: The MIT License (MIT)
+## SavedVariables: DiabolicUI_DB, DiabolicBarsDB, DiabolicUI_OptionsDB, DiabolicUI_ErrorLog
+## SavedVariablesPerCharacter: DiabolicUI_CharDB
+## X-License: DiabolicUI: MIT. Bartender4: All rights reserved (Nevcairiel), embedded unchanged except renaming.
 ## X-Category: Interface Enhancements
+
+### error log (first, so it catches load errors too)
+errorlog.lua
 
 ### localization
 locale\locale.xml
@@ -26,12 +28,11 @@ data\data.xml
 media\media.xml
 config\config.xml
 
+### action bars (Bartender4 4.4.2, embedded as DiabolicBars)
+bartender\bartender.xml
+
 ### the modules
 modules\modules.xml
 
-## SavedVariablesPerCharacter: DiabolicUI_CharDB
-modules\options\options.lua
-modules\options\minimap_button.lua
-modules\options\movers.lua
-modules\moveframes\moveframes.lua
-
+### options menu (/dui)
+modules\options\options.xml

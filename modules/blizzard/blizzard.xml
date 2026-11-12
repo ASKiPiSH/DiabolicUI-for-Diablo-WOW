@@ -10,7 +10,6 @@
 <Script file='mirrortimers.lua'/>
 <Script file='popups.lua'/>
 <Script file='tooltips.lua'/>
-<Script file='totembar.lua'/>
 <Script file='tracker.lua'/>
 <Script file='vehicleseat.lua'/>
 

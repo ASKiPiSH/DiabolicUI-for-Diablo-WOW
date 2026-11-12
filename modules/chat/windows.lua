@@ -311,33 +311,11 @@ Module.StyleFrame = function(self, frame)
 	_G[name.."EditBoxIconTexture"]:SetSize(unpack(config.editbox.icon.texture_size))
 	_G[name.."EditBoxIconTexture"]:SetPoint(unpack(config.editbox.icon.texture_position))
 	_G[name.."EditBoxIconTexture"]:SetTexture(config.editbox.icon.texture)
+	-- Diablo-WoW: removed the "stuck key" filter that wiped the text and closed the
+	-- edit box whenever the last 6 characters were equal (")))))", "!!!!!!", "......"),
+	-- and the forced Hide() on focus loss. The 3.3.5 client already hides the edit box
+	-- itself in the "im" chat style and keeps it in the "classic" style.
 	_G[name.."EditBox"]:HookScript("OnEditFocusGained", function(self) self:Show() end)
-	_G[name.."EditBox"]:HookScript("OnEditFocusLost", function(self) self:Hide() end)
-
-
-	-- hook editbox updates to our coloring method
-	--hooksecurefunc("ChatEdit_UpdateHeader", function(...) self:UpdateEditBox(...) end)
-	local min_repeat_chars = 5
-	_G[name.."EditBox"]:HookScript("OnTextChanged", function(self)
-		local msg = self:GetText()
---		if UnitAffectingCombat("player") then
-			local min_repeat_chars = 5
-			if strlen(msg) > min_repeat_chars then
-				local stuck = true
-				for i = 1, min_repeat_chars, 1 do 
-					if strsub(msg,0-i, 0-i) ~= strsub(msg,(-1-i),(-1-i)) then
-						stuck = false
-						break
-					end
-				end
-				if stuck then
-					self:SetText("")
-					self:Hide()
-					return
-				end
-			end
---		end
-	end)
 
 
 	-- Buttons

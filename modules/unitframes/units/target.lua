@@ -476,6 +476,14 @@ local Style = function(self, unit)
 	self.layers.threat.ThreatBoss = ThreatBoss
 	self.layers.threat.ThreatBossPower = ThreatBossPower
 
+	-- Auras (Diablo-WoW): debuffs/buffs under the target frame
+	-------------------------------------------------------------------
+	local Auras = CreateFrame("Frame", nil, self)
+	Auras.size, Auras.spacing, Auras.perRow, Auras.max = 26, 4, 8, 16
+	Auras:SetSize(Auras.perRow * (Auras.size + Auras.spacing) - Auras.spacing, Auras.size)
+	Auras:SetPoint("TOP", self, "BOTTOM", 0, -44)
+	self.Auras = Auras
+
 	self.CastBar = CastBar
 	self.Classification = Classification
 	self.Classification.PostUpdate = Classification_PostUpdate

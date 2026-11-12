@@ -1,3 +1,142 @@
-﻿<Bindings>
-
+<Bindings>
+	<Binding name="CLICK DBTButton1:LeftButton" header="DiabolicBars" />
+	<Binding name="CLICK DBTButton2:LeftButton" />
+	<Binding name="CLICK DBTButton3:LeftButton" />
+	<Binding name="CLICK DBTButton4:LeftButton" />
+	<Binding name="CLICK DBTButton5:LeftButton" />
+	<Binding name="CLICK DBTButton6:LeftButton" />
+	<Binding name="CLICK DBTButton7:LeftButton" />
+	<Binding name="CLICK DBTButton8:LeftButton" />
+	<Binding name="CLICK DBTButton9:LeftButton" />
+	<Binding name="CLICK DBTButton10:LeftButton" />
+	<Binding name="CLICK DBTButton11:LeftButton" />
+	<Binding name="CLICK DBTButton12:LeftButton" />
+	<Binding name="CLICK DBTButton13:LeftButton" header="DBTBLANK2" />
+	<Binding name="CLICK DBTButton14:LeftButton" />
+	<Binding name="CLICK DBTButton15:LeftButton" />
+	<Binding name="CLICK DBTButton16:LeftButton" />
+	<Binding name="CLICK DBTButton17:LeftButton" />
+	<Binding name="CLICK DBTButton18:LeftButton" />
+	<Binding name="CLICK DBTButton19:LeftButton" />
+	<Binding name="CLICK DBTButton20:LeftButton" />
+	<Binding name="CLICK DBTButton21:LeftButton" />
+	<Binding name="CLICK DBTButton22:LeftButton" />
+	<Binding name="CLICK DBTButton23:LeftButton" />
+	<Binding name="CLICK DBTButton24:LeftButton" />
+	<Binding name="CLICK DBTButton25:LeftButton" header="DBTBLANK3" />
+	<Binding name="CLICK DBTButton26:LeftButton" />
+	<Binding name="CLICK DBTButton27:LeftButton" />
+	<Binding name="CLICK DBTButton28:LeftButton" />
+	<Binding name="CLICK DBTButton29:LeftButton" />
+	<Binding name="CLICK DBTButton30:LeftButton" />
+	<Binding name="CLICK DBTButton31:LeftButton" />
+	<Binding name="CLICK DBTButton32:LeftButton" />
+	<Binding name="CLICK DBTButton33:LeftButton" />
+	<Binding name="CLICK DBTButton34:LeftButton" />
+	<Binding name="CLICK DBTButton35:LeftButton" />
+	<Binding name="CLICK DBTButton36:LeftButton" />
+	<Binding name="CLICK DBTButton37:LeftButton" header="DBTBLANK4" />
+	<Binding name="CLICK DBTButton38:LeftButton" />
+	<Binding name="CLICK DBTButton39:LeftButton" />
+	<Binding name="CLICK DBTButton40:LeftButton" />
+	<Binding name="CLICK DBTButton41:LeftButton" />
+	<Binding name="CLICK DBTButton42:LeftButton" />
+	<Binding name="CLICK DBTButton43:LeftButton" />
+	<Binding name="CLICK DBTButton44:LeftButton" />
+	<Binding name="CLICK DBTButton45:LeftButton" />
+	<Binding name="CLICK DBTButton46:LeftButton" />
+	<Binding name="CLICK DBTButton47:LeftButton" />
+	<Binding name="CLICK DBTButton48:LeftButton" />
+	<Binding name="CLICK DBTButton49:LeftButton" header="DBTBLANK5" />
+	<Binding name="CLICK DBTButton50:LeftButton" />
+	<Binding name="CLICK DBTButton51:LeftButton" />
+	<Binding name="CLICK DBTButton52:LeftButton" />
+	<Binding name="CLICK DBTButton53:LeftButton" />
+	<Binding name="CLICK DBTButton54:LeftButton" />
+	<Binding name="CLICK DBTButton55:LeftButton" />
+	<Binding name="CLICK DBTButton56:LeftButton" />
+	<Binding name="CLICK DBTButton57:LeftButton" />
+	<Binding name="CLICK DBTButton58:LeftButton" />
+	<Binding name="CLICK DBTButton59:LeftButton" />
+	<Binding name="CLICK DBTButton60:LeftButton" />
+	<Binding name="CLICK DBTButton61:LeftButton" header="DBTBLANK6" />
+	<Binding name="CLICK DBTButton62:LeftButton" />
+	<Binding name="CLICK DBTButton63:LeftButton" />
+	<Binding name="CLICK DBTButton64:LeftButton" />
+	<Binding name="CLICK DBTButton65:LeftButton" />
+	<Binding name="CLICK DBTButton66:LeftButton" />
+	<Binding name="CLICK DBTButton67:LeftButton" />
+	<Binding name="CLICK DBTButton68:LeftButton" />
+	<Binding name="CLICK DBTButton69:LeftButton" />
+	<Binding name="CLICK DBTButton70:LeftButton" />
+	<Binding name="CLICK DBTButton71:LeftButton" />
+	<Binding name="CLICK DBTButton72:LeftButton" />
+	<Binding name="CLICK DBTButton73:LeftButton" header="DBTBLANK7" />
+	<Binding name="CLICK DBTButton74:LeftButton" />
+	<Binding name="CLICK DBTButton75:LeftButton" />
+	<Binding name="CLICK DBTButton76:LeftButton" />
+	<Binding name="CLICK DBTButton77:LeftButton" />
+	<Binding name="CLICK DBTButton78:LeftButton" />
+	<Binding name="CLICK DBTButton79:LeftButton" />
+	<Binding name="CLICK DBTButton80:LeftButton" />
+	<Binding name="CLICK DBTButton81:LeftButton" />
+	<Binding name="CLICK DBTButton82:LeftButton" />
+	<Binding name="CLICK DBTButton83:LeftButton" />
+	<Binding name="CLICK DBTButton84:LeftButton" />
+	<Binding name="CLICK DBTButton85:LeftButton" header="DBTBLANK8" />
+	<Binding name="CLICK DBTButton86:LeftButton" />
+	<Binding name="CLICK DBTButton87:LeftButton" />
+	<Binding name="CLICK DBTButton88:LeftButton" />
+	<Binding name="CLICK DBTButton89:LeftButton" />
+	<Binding name="CLICK DBTButton90:LeftButton" />
+	<Binding name="CLICK DBTButton91:LeftButton" />
+	<Binding name="CLICK DBTButton92:LeftButton" />
+	<Binding name="CLICK DBTButton93:LeftButton" />
+	<Binding name="CLICK DBTButton94:LeftButton" />
+	<Binding name="CLICK DBTButton95:LeftButton" />
+	<Binding name="CLICK DBTButton96:LeftButton" />
+	<Binding name="CLICK DBTButton97:LeftButton" header="DBTBLANK9" />
+	<Binding name="CLICK DBTButton98:LeftButton" />
+	<Binding name="CLICK DBTButton99:LeftButton" />
+	<Binding name="CLICK DBTButton100:LeftButton" />
+	<Binding name="CLICK DBTButton101:LeftButton" />
+	<Binding name="CLICK DBTButton102:LeftButton" />
+	<Binding name="CLICK DBTButton103:LeftButton" />
+	<Binding name="CLICK DBTButton104:LeftButton" />
+	<Binding name="CLICK DBTButton105:LeftButton" />
+	<Binding name="CLICK DBTButton106:LeftButton" />
+	<Binding name="CLICK DBTButton107:LeftButton" />
+	<Binding name="CLICK DBTButton108:LeftButton" />
+	<Binding name="CLICK DBTButton109:LeftButton" header="DBTBLANK10" />
+	<Binding name="CLICK DBTButton110:LeftButton" />
+	<Binding name="CLICK DBTButton111:LeftButton" />
+	<Binding name="CLICK DBTButton112:LeftButton" />
+	<Binding name="CLICK DBTButton113:LeftButton" />
+	<Binding name="CLICK DBTButton114:LeftButton" />
+	<Binding name="CLICK DBTButton115:LeftButton" />
+	<Binding name="CLICK DBTButton116:LeftButton" />
+	<Binding name="CLICK DBTButton117:LeftButton" />
+	<Binding name="CLICK DBTButton118:LeftButton" />
+	<Binding name="CLICK DBTButton119:LeftButton" />
+	<Binding name="CLICK DBTButton120:LeftButton" />
+	<Binding name="CLICK DBTPetButton1:LeftButton" header="DBTPET" />
+	<Binding name="CLICK DBTPetButton2:LeftButton" />
+	<Binding name="CLICK DBTPetButton3:LeftButton" />
+	<Binding name="CLICK DBTPetButton4:LeftButton" />
+	<Binding name="CLICK DBTPetButton5:LeftButton" />
+	<Binding name="CLICK DBTPetButton6:LeftButton" />
+	<Binding name="CLICK DBTPetButton7:LeftButton" />
+	<Binding name="CLICK DBTPetButton8:LeftButton" />
+	<Binding name="CLICK DBTPetButton9:LeftButton" />
+	<Binding name="CLICK DBTPetButton10:LeftButton" />
+	<Binding name="CLICK DBTStanceButton1:LeftButton" header="DBTSTANCE" />
+	<Binding name="CLICK DBTStanceButton2:LeftButton" />
+	<Binding name="CLICK DBTStanceButton3:LeftButton" />
+	<Binding name="CLICK DBTStanceButton4:LeftButton" />
+	<Binding name="CLICK DBTStanceButton5:LeftButton" />
+	<Binding name="CLICK DBTStanceButton6:LeftButton" />
+	<Binding name="CLICK DBTStanceButton7:LeftButton" />
+	<Binding name="CLICK DBTStanceButton8:LeftButton" />
+	<Binding name="CLICK DBTStanceButton9:LeftButton" />
+	<Binding name="CLICK DBTStanceButton10:LeftButton" />
 </Bindings>
