@@ -1,19 +1,17 @@
 --[[
-	DiabolicUI options (Diablo-WoW) — one menu for the whole interface.
-	Replaces the old options.lua / movers.lua / moveframes.lua / minimap_button.lua,
-	which overlapped, registered the same /diomove command three times and saved into
-	a table that was never declared in the .toc (so nothing was kept between sessions).
+	DiabolicUI options (Diablo-WoW)
+	Everything lives in one window: the DiabolicBars (Bartender4) options, with the
+	DiabolicUI pages added after the bar pages.
 
-	/dui                 open/close the menu
-	/dui lock            lock/unlock the action bars (drag them while unlocked)
+	/dui                 open the options (bars page)
+	/dui lock            unlock/lock bars and movable elements
 	/dui kb              keybinding mode (hover a button and press a key)
 	/dui reset           default action bar layout
 	/dui errors [clear]  print/clear the error log
-	Also available in Esc > Interface > AddOns > DiabolicUI.
+	Also: Esc > Interface > AddOns > DiabolicUI.
 ]]
 local ADDON, Engine = ...
 local Module = Engine:NewModule("Options", "LOW")
-local path = ([[Interface\AddOns\%s\media\]]):format(ADDON)
 
 local pairs, ipairs, type, select, tostring = pairs, ipairs, type, select, tostring
 local CreateFrame = CreateFrame
@@ -23,12 +21,17 @@ local PREFIX = "|cff8a0707Diabolic|r|cffffffffUI|r: "
 local function Print(msg) DEFAULT_CHAT_FRAME:AddMessage(PREFIX .. msg) end
 
 -------------------------------------------------------------------------------
--- saved settings (per character)
+-- saved settings
 -------------------------------------------------------------------------------
 local function CharDB()
 	DiabolicUI_CharDB = DiabolicUI_CharDB or {}
 	DiabolicUI_CharDB.hidden = DiabolicUI_CharDB.hidden or {}
 	return DiabolicUI_CharDB
+end
+
+local function OptDB()
+	DiabolicUI_OptionsDB = DiabolicUI_OptionsDB or {}
+	return DiabolicUI_OptionsDB
 end
 
 -------------------------------------------------------------------------------
@@ -74,7 +77,11 @@ local Elements = {
 	{ key = "pet", title = "Фрейм питомца", secure = true, get = function() return Collect(W("UnitFrames", "Unit: Pet")) end },
 	{ key = "minimap", title = "Миникарта", get = function()
 		local m = Engine:GetModule("Minimap", true)
-		return Collect(m and m.GetFrame and m:GetFrame())
+		return Collect(m and m.frame)
+	end },
+	{ key = "minimapbuttons", title = "Кнопки у миникарты", get = function()
+		local m = Engine:GetModule("MinimapButtons", true)
+		return Collect(m and m.bar)
 	end },
 	{ key = "xp", title = "Полоска опыта / парагона", get = function()
 		return Collect(W("ActionBars", "Bar: XP"), _G.ParagonXPBarFrame)
@@ -82,7 +89,7 @@ local Elements = {
 	{ key = "buffs", title = "Баффы и дебаффы игрока", get = function()
 		return Collect(BuffFrame, TemporaryEnchantFrame, ConsolidatedBuffs)
 	end },
-	{ key = "tracker", title = "Список заданий", get = function() return Collect(WatchFrame) end },
+	{ key = "tracker", title = "Задачи", get = function() return Collect(WatchFrame) end },
 	{ key = "chat", title = "Окна чата", get = function()
 		local t = {}
 		for i = 1, (NUM_CHAT_WINDOWS or 10) do
@@ -91,7 +98,7 @@ local Elements = {
 				if f then t[#t + 1] = f end
 			end
 		end
-		for _, n in ipairs({ "GeneralDockManager", "ChatFrameMenuButton", "FriendsMicroButton" }) do
+		for _, n in ipairs({ "GeneralDockManager", "ChatFrameMenuButton" }) do
 			if _G[n] then t[#t + 1] = _G[n] end
 		end
 		return t
@@ -141,247 +148,42 @@ Module.ApplyAllElements = function(self)
 end
 
 -------------------------------------------------------------------------------
--- action bars (embedded DiabolicBars / Bartender4)
+-- actions
 -------------------------------------------------------------------------------
-local function BT() return _G.DiabolicBars end
-
-local Bars = {
-	{ id = 1, title = "Основная панель (1 ряд)" },
-	{ id = 6, title = "Нижняя панель (2 ряд)" },
-	{ id = 5, title = "Нижняя панель (3 ряд)" },
-	{ id = 3, title = "Правая панель 1" },
-	{ id = 4, title = "Правая панель 2" },
-	{ module = "PetBar", title = "Панель питомца" },
-	{ module = "StanceBar", title = "Панель стоек / облика" },
-	{ module = "MicroMenu", title = "Меню (персонаж, магазин, трансмог...)" },
-	{ module = "BagBar", title = "Сумки" },
-	{ module = "MultiCast", title = "Тотемы (шаман)" },
-}
-
-local function BarEnabled(b)
-	local bt = BT()
-	if not bt or not bt.db then return false end
-	if b.id then
-		local AB = bt:GetModule("ActionBars", true)
-		return AB and AB.db.profile.actionbars[b.id].enabled
-	end
-	local m = bt:GetModule(b.module, true)
-	return m and m.db and m.db.profile.enabled
-end
-
-local function SetBarEnabled(b, on)
-	local bt = BT()
-	if not bt or InCombatLockdown() then
-		Print("панели нельзя менять в бою.")
-		return
-	end
-	if b.id then
-		local AB = bt:GetModule("ActionBars", true)
-		if not AB then return end
-		if on then AB:EnableBar(b.id) else AB:DisableBar(b.id); AB.db.profile.actionbars[b.id].enabled = false end
-	else
-		local m = bt:GetModule(b.module, true)
-		if m then m:ToggleModule(nil, on and true or false) end
-	end
-	local AB = Engine:GetModule("ActionBars", true)
-	if AB and AB.RaiseBars then AB:RaiseBars() end
-end
-
--------------------------------------------------------------------------------
--- small widget helpers
--------------------------------------------------------------------------------
-local BACKDROP = {
-	bgFile = [[Interface\ChatFrame\ChatFrameBackground]],
-	edgeFile = path .. [[textures\DiabolicUI_Tooltip_Border.tga]],
-	edgeSize = 32, tile = false, tileSize = 0,
-	insets = { left = 23, right = 23, top = 23, bottom = 23 }
-}
-
-local function Header(parent, text, x, y)
-	local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	fs:SetPoint("TOPLEFT", x, y)
-	fs:SetText(text)
-	fs:SetTextColor(.85, .7, .4)
-	return fs
-end
-
-local function Check(parent, text, x, y, get, set)
-	local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-	cb:SetSize(24, 24)
-	cb:SetPoint("TOPLEFT", x, y)
-	local label = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	label:SetPoint("LEFT", cb, "RIGHT", 2, 1)
-	label:SetText(text)
-	cb.refresh = function() cb:SetChecked(get() and true or false) end
-	cb:SetScript("OnClick", function(self)
-		set(self:GetChecked() and true or false)
-		self.refresh()
-	end)
-	return cb
-end
-
-local function Button(parent, text, x, y, w, onclick)
-	local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-	b:SetSize(w or 150, 22)
-	b:SetPoint("TOPLEFT", x, y)
-	b:SetText(text)
-	b:SetScript("OnClick", onclick)
-	return b
-end
-
--------------------------------------------------------------------------------
--- menu
--------------------------------------------------------------------------------
-Module.CreateMenu = function(self)
-	if self.frame then return self.frame end
-	local f = CreateFrame("Frame", "DiabolicUIOptionsFrame", UIParent)
-	f:SetSize(640, 560)
-	f:SetPoint("CENTER")
-	f:SetFrameStrata("DIALOG")
-	f:SetBackdrop(BACKDROP)
-	f:SetBackdropColor(0, 0, 0, .9)
-	f:EnableMouse(true)
-	f:SetMovable(true)
-	f:SetClampedToScreen(true)
-	f:RegisterForDrag("LeftButton")
-	f:SetScript("OnDragStart", f.StartMoving)
-	f:SetScript("OnDragStop", f.StopMovingOrSizing)
-	f:Hide()
-	tinsert(UISpecialFrames, "DiabolicUIOptionsFrame")
-
-	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
-	title:SetPoint("TOP", 0, -28)
-	title:SetText("|cff8a0707Diabolic|r|cffffffffUI|r")
-
-	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-	close:SetPoint("TOPRIGHT", -18, -18)
-
-	f.checks = {}
-	local L, R = 34, 340
-
-	-- left column: action bars
-	Header(f, "Панели команд", L, -64)
-	Button(f, "Разблокировать / закрепить", L, -92, 190, function() self:ToggleLock() end)
-	Button(f, "Назначить клавиши", L + 196, -92, 100, function() self:KeyBindMode() end)
-	Button(f, "Все настройки панелей…", L, -118, 190, function()
-		f:Hide()
-		local AB = Engine:GetModule("ActionBars", true)
-		if AB then AB:OpenBarOptions() end
-	end)
-	Button(f, "Сбросить", L + 196, -118, 100, function()
-		local AB = Engine:GetModule("ActionBars", true)
-		if AB then AB:ApplyDefaultLayout() end
-		self:Refresh()
-	end)
-
-	local rowsLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	rowsLabel:SetPoint("TOPLEFT", L + 4, -152)
-	rowsLabel:SetText("Рядов внизу:")
-	for i = 1, 3 do
-		local b = Button(f, tostring(i), L + 90 + (i - 1) * 36, -146, 32, function()
-			local AB = Engine:GetModule("ActionBars", true)
-			if AB then AB:SetNumBottomRows(i) end
-			self:Refresh()
-		end)
-	end
-
-	local y = -176
-	for _, b in ipairs(Bars) do
-		f.checks[#f.checks + 1] = Check(f, b.title, L, y, function() return BarEnabled(b) end, function(v) SetBarEnabled(b, v) end)
-		y = y - 24
-	end
-	f.checks[#f.checks + 1] = Check(f, "Подложка (демон, ангел, череп)", L, y,
-		function() local AB = Engine:GetModule("ActionBars", true); return AB and AB.db.show_artwork ~= false end,
-		function(v) local AB = Engine:GetModule("ActionBars", true); if AB then AB.db.show_artwork = v; AB:UpdateArtwork() end end)
-
-	-- right column: elements
-	Header(f, "Элементы интерфейса", R, -64)
-	y = -92
-	for _, e in ipairs(Elements) do
-		f.checks[#f.checks + 1] = Check(f, e.title, R, y,
-			function() return not CharDB().hidden[e.key] end,
-			function(v) self:SetElementHidden(e.key, not v) end)
-		y = y - 24
-	end
-
-	-- enemies
-	y = y - 8
-	Header(f, "Полоски врагов", R, y)
-	y = y - 26
-	local NP = Engine:GetModule("NamePlates", true)
-	local modes = {
-		{ "normal", "Над моделью (боссы и элиты — сверху)" },
-		{ "all", "Над моделью для всех врагов" },
-		{ "top", "Только сверху (как раньше)" },
-	}
-	f.radios = {}
-	for _, m in ipairs(modes) do
-		local r = CreateFrame("CheckButton", nil, f, "UIRadioButtonTemplate")
-		r:SetPoint("TOPLEFT", R + 4, y)
-		local label = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		label:SetPoint("LEFT", r, "RIGHT", 4, 0)
-		label:SetText(m[2])
-		r.mode = m[1]
-		r:SetScript("OnClick", function()
-			if NP then NP:SetEnemyMode(m[1]) end
-			self:Refresh()
-		end)
-		f.radios[#f.radios + 1] = r
-		y = y - 20
-	end
-	if NP then
-		f.checks[#f.checks + 1] = Check(f, "Мои дебаффы над полоской цели", R, y - 4,
-			function() return NP.db and NP.db.showDebuffs end,
-			function(v) NP.db.showDebuffs = v end)
-	end
-
-	-- footer: error log
-	f.errors = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	f.errors:SetPoint("BOTTOMLEFT", 36, 34)
-	Button(f, "Журнал ошибок", 440, -(560 - 56), 160, function() self:PrintErrors() end)
-
-	self.frame = f
-	f:SetScript("OnShow", function() self:Refresh() end)
-	return f
-end
-
-Module.Refresh = function(self)
-	local f = self.frame
-	if not f then return end
-	for _, cb in ipairs(f.checks) do cb.refresh() end
-	local NP = Engine:GetModule("NamePlates", true)
-	local mode = NP and NP.db and NP.db.enemyMode or "normal"
-	for _, r in ipairs(f.radios) do r:SetChecked(r.mode == mode) end
-	local n = #(DiabolicUI_GetErrorLog and DiabolicUI_GetErrorLog() or {})
-	f.errors:SetText(n > 0 and ("Ошибок в журнале: %d (/dui errors)"):format(n) or "Ошибок нет")
-end
-
-Module.Toggle = function(self)
-	local f = self:CreateMenu()
-	if f:IsShown() then f:Hide() else f:Show() end
-end
+local function AB() return Engine:GetModule("ActionBars", true) end
+local function NP() return Engine:GetModule("NamePlates", true) end
+local function MV() return Engine:GetModule("Movers", true) end
 
 Module.ToggleLock = function(self)
 	if InCombatLockdown() then return Print("нельзя в бою.") end
-	local AB = Engine:GetModule("ActionBars", true)
-	if AB then AB:ToggleBarLock() end
-	if self.frame then self.frame:Hide() end
+	local BT = _G.DiabolicBars
+	if BT and BT.ToggleLock then BT:ToggleLock() end
+	local ACD = LibStub("AceConfigDialog-3.0", true)
+	if ACD then ACD:Close("DiabolicBars") end
 end
 
 Module.KeyBindMode = function(self)
-	local KB = LibStub and LibStub("LibKeyBound-1.0", true)
+	local KB = LibStub("LibKeyBound-1.0", true)
 	if KB then
-		if self.frame then self.frame:Hide() end
+		local ACD = LibStub("AceConfigDialog-3.0", true)
+		if ACD then ACD:Close("DiabolicBars") end
 		KB:Toggle()
 	end
+end
+
+Module.Open = function(self, group)
+	if InCombatLockdown() then return Print("настройки недоступны в бою.") end
+	local ACD = LibStub("AceConfigDialog-3.0", true)
+	if not ACD then return end
+	ACD:Open("DiabolicBars")
+	ACD:SelectGroup("DiabolicBars", group or "bars")
 end
 
 Module.PrintErrors = function(self, clear)
 	local log = DiabolicUI_GetErrorLog and DiabolicUI_GetErrorLog() or {}
 	if clear then
 		wipe(log)
-		Print("журнал ошибок очищен.")
-		return self:Refresh()
+		return Print("журнал ошибок очищен.")
 	end
 	if #log == 0 then return Print("ошибок нет.") end
 	Print(("ошибок: %d (полностью — в WTF\\...\\SavedVariables\\DiabolicUI.lua)"):format(#log))
@@ -389,6 +191,174 @@ Module.PrintErrors = function(self, clear)
 		local e = log[i]
 		DEFAULT_CHAT_FRAME:AddMessage(("|cffff5555%d.|r [x%d] %s"):format(i, e.count or 1, e.msg))
 	end
+end
+
+-------------------------------------------------------------------------------
+-- AceConfig pages (added to the DiabolicBars options window)
+-------------------------------------------------------------------------------
+local function BuildOptions()
+	local args = {}
+
+	-- Interface ---------------------------------------------------------------
+	args.dui_general = {
+		type = "group", order = 30, name = "Интерфейс",
+		args = {
+			about = { type = "description", order = 0, fontSize = "medium",
+				name = "Общие настройки DiabolicUI. Панели команд настраиваются в разделе «Панели» выше.\n" },
+			uiScale = {
+				type = "range", order = 1, width = "double",
+				name = "Размер интерфейса DiabolicUI",
+				desc = "Размер всех элементов DiabolicUI (панели, сферы, цель, миникарта). Не зависит от масштаба в настройках видео.",
+				min = .5, max = 1.5, step = .05, isPercent = true,
+				get = function() return tonumber(OptDB().uiScale) or 1 end,
+				set = function(_, v)
+					if InCombatLockdown() then return Print("нельзя в бою.") end
+					OptDB().uiScale = v
+					Engine:UpdateScale()
+				end,
+			},
+			unlock = {
+				type = "execute", order = 2,
+				name = "Перемещение элементов",
+				desc = "Разблокировать панели и элементы (миникарта, задачи, полоса заклинаний, баффы, цель, фокус). Перетаскивайте зелёные рамки; правый клик возвращает элемент на место.",
+				func = function() Module:ToggleLock() end,
+			},
+			keybind = {
+				type = "execute", order = 3,
+				name = "Назначить клавиши",
+				desc = "Наведите курсор на кнопку и нажмите клавишу.",
+				func = function() Module:KeyBindMode() end,
+			},
+			hdr1 = { type = "header", order = 10, name = "Нижние панели" },
+			rows = {
+				type = "select", order = 11,
+				name = "Рядов кнопок внизу",
+				desc = "Подложка (демон, ангел, череп) подстраивается под 1, 2 или 3 ряда.",
+				values = { [1] = "1 ряд (крупные кнопки)", [2] = "2 ряда", [3] = "3 ряда" },
+				get = function() local m = AB(); return m and m:GetNumBottomRows() or 1 end,
+				set = function(_, v) local m = AB(); if m then m:SetNumBottomRows(v) end end,
+			},
+			artwork = {
+				type = "toggle", order = 12,
+				name = "Подложка (демон, ангел, череп)",
+				get = function() local m = AB(); return m and m.db.show_artwork ~= false end,
+				set = function(_, v) local m = AB(); if m then m.db.show_artwork = v; m:UpdateArtwork() end end,
+			},
+			resetLayout = {
+				type = "execute", order = 13,
+				name = "Раскладка по умолчанию",
+				desc = "Вернуть все панели команд на места по умолчанию.",
+				confirm = true, confirmText = "Вернуть все панели на места по умолчанию?",
+				func = function() local m = AB(); if m then m:ApplyDefaultLayout() end end,
+			},
+			resetMovers = {
+				type = "execute", order = 14,
+				name = "Сбросить элементы",
+				desc = "Вернуть миникарту, задачи, полосу заклинаний, баффы, цель и фокус на места и к исходному размеру.",
+				confirm = true, confirmText = "Вернуть элементы на места по умолчанию?",
+				func = function() local m = MV(); if m then m:ResetAll() end end,
+			},
+		},
+	}
+
+	-- Elements -----------------------------------------------------------------
+	local el = {
+		about = { type = "description", order = 0, fontSize = "medium",
+			name = "Снимите галочку, чтобы скрыть элемент. Размер — ползунком рядом. Переместить: «Интерфейс» → «Перемещение элементов».\n" },
+	}
+	for i, e in ipairs(Elements) do
+		el[e.key] = {
+			type = "toggle", order = i * 2, width = "double",
+			name = e.title,
+			get = function() return not CharDB().hidden[e.key] end,
+			set = function(_, v) Module:SetElementHidden(e.key, not v) end,
+		}
+	end
+	local mv = MV()
+	if mv and mv.List then
+		el.hdrSize = { type = "header", order = 100, name = "Размер" }
+		for i, m in ipairs(mv.List) do
+			el["size_" .. m.key] = {
+				type = "range", order = 100 + i,
+				name = m.title,
+				min = .5, max = 2, step = .05, isPercent = true,
+				get = function() return MV():GetScale(m.key) end,
+				set = function(_, v) MV():SetScale(m.key, v) end,
+			}
+		end
+	end
+	args.dui_elements = { type = "group", order = 31, name = "Элементы", args = el }
+
+	-- Bars above the units -------------------------------------------------------
+	args.dui_plates = {
+		type = "group", order = 32, name = "Полоски над головой",
+		args = {
+			about = { type = "description", order = 0, fontSize = "medium",
+				name = "Полоски здоровья над моделями в стиле DiabolicUI. Боссы, элиты и редкие противники всегда показываются и сверху экрана.\n" },
+			mode = {
+				type = "select", order = 1, width = "double",
+				name = "Цель показывается",
+				values = {
+					plates = "Над моделью (боссы, элиты, редкие — сверху)",
+					enemies = "Над моделью только обычные враги",
+					top = "Только сверху экрана (как раньше)",
+				},
+				get = function() local m = NP(); return m and m.db.targetMode or "plates" end,
+				set = function(_, v) local m = NP(); if m then m:SetEnemyMode(v) end end,
+			},
+			friendly = {
+				type = "toggle", order = 2, width = "double",
+				name = "Полоски над союзниками и игроками",
+				desc = "Включает полоски над дружественными персонажами и НИП.",
+				get = function() local m = NP(); return m and m.db.showFriendlyPlates end,
+				set = function(_, v) local m = NP(); if m then m.db.showFriendlyPlates = v; m:ApplyPlateCVars(); m:UpdateTopTargetFrame() end end,
+			},
+			scale = {
+				type = "range", order = 3, width = "double",
+				name = "Размер полосок",
+				min = .4, max = 1.5, step = .05, isPercent = true,
+				get = function() local m = NP(); return m and m.db.scale or .8 end,
+				set = function(_, v) local m = NP(); if m then m.db.scale = v; m:UpdateScale() end end,
+			},
+			healthText = {
+				type = "toggle", order = 4,
+				name = "Здоровье числом",
+				get = function() local m = NP(); return m and m.db.showHealthText end,
+				set = function(_, v) local m = NP(); if m then m.db.showHealthText = v end end,
+			},
+			debuffs = {
+				type = "toggle", order = 5,
+				name = "Мои дебаффы над целью",
+				get = function() local m = NP(); return m and m.db.showDebuffs end,
+				set = function(_, v) local m = NP(); if m then m.db.showDebuffs = v end end,
+			},
+		},
+	}
+
+	-- Error log -----------------------------------------------------------------
+	args.dui_errors = {
+		type = "group", order = 33, name = "Журнал ошибок",
+		args = {
+			list = {
+				type = "description", order = 1, fontSize = "small",
+				name = function()
+					local log = DiabolicUI_GetErrorLog and DiabolicUI_GetErrorLog() or {}
+					if #log == 0 then return "Ошибок нет." end
+					local out = {}
+					for i = #log, math.max(1, #log - 14), -1 do
+						local e = log[i]
+						out[#out + 1] = ("|cffff5555[x%d]|r %s"):format(e.count or 1, e.msg)
+					end
+					return table.concat(out, "\n\n")
+				end,
+			},
+			clear = {
+				type = "execute", order = 2, name = "Очистить",
+				func = function() Module:PrintErrors(true); LibStub("AceConfigRegistry-3.0"):NotifyChange("DiabolicBars") end,
+			},
+		},
+	}
+	return args
 end
 
 -------------------------------------------------------------------------------
@@ -404,15 +374,15 @@ Module.CreateBlizzardPanel = function(self)
 	d:SetPoint("TOPLEFT", t, "BOTTOMLEFT", 0, -10)
 	d:SetWidth(560)
 	d:SetJustifyH("LEFT")
-	d:SetText("Все настройки интерфейса открываются командой |cffffd100/dui|r или кнопкой ниже.")
+	d:SetText("Все настройки интерфейса и панелей открываются командой |cffffd100/dui|r или кнопкой ниже.")
 	local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-	b:SetSize(200, 24)
+	b:SetSize(220, 24)
 	b:SetPoint("TOPLEFT", d, "BOTTOMLEFT", 0, -14)
 	b:SetText("Открыть настройки DiabolicUI")
 	b:SetScript("OnClick", function()
 		if InterfaceOptionsFrame then InterfaceOptionsFrame:Hide() end
 		HideUIPanel(GameMenuFrame)
-		self:Toggle()
+		self:Open()
 	end)
 	InterfaceOptions_AddCategory(panel)
 end
@@ -422,6 +392,15 @@ end
 -------------------------------------------------------------------------------
 Module.OnInit = function(self)
 	CharDB()
+	-- the DiabolicBars options table is built lazily, add our pages when it is
+	local BT = _G.DiabolicBars
+	if BT then
+		BT.OnOptionsCreated = function(_, options)
+			for k, v in pairs(BuildOptions()) do
+				options.args[k] = v
+			end
+		end
+	end
 end
 
 Module.OnEnable = function(self)
@@ -429,39 +408,42 @@ Module.OnEnable = function(self)
 	SLASH_DIABOLICUIOPTIONS2 = "/диабло"
 	SlashCmdList["DIABOLICUIOPTIONS"] = function(msg)
 		msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-		if msg == "lock" or msg == "unlock" then
+		if msg == "lock" or msg == "unlock" or msg == "move" then
 			self:ToggleLock()
 		elseif msg == "kb" or msg == "bind" then
 			self:KeyBindMode()
 		elseif msg == "reset" then
-			local AB = Engine:GetModule("ActionBars", true)
-			if AB then AB:ApplyDefaultLayout() end
+			local m = AB(); if m then m:ApplyDefaultLayout() end
 		elseif msg == "errors" then
 			self:PrintErrors()
 		elseif msg == "errors clear" then
 			self:PrintErrors(true)
 		else
-			self:Toggle()
+			self:Open()
 		end
 	end
 	self:CreateBlizzardPanel()
-	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
 	self:RegisterEvent("PLAYER_REGEN_ENABLED", "OnRegenEnabled")
-end
 
-Module.OnEnteringWorld = function(self)
-	self:UnregisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
-	self:ApplyAllElements()
+	-- apply hidden elements once everything exists
+	local elapsed, done = 0, 0
+	local f = CreateFrame("Frame")
+	f:SetScript("OnUpdate", function(f, e)
+		elapsed = elapsed + e
+		if elapsed < 1 then return end
+		elapsed = 0
+		done = done + 1
+		if not InCombatLockdown() then
+			self:ApplyAllElements()
+		end
+		if done >= 3 then f:SetScript("OnUpdate", nil) end
+	end)
 end
 
 Module.OnRegenEnabled = function(self)
 	if pendingApply then
 		pendingApply = nil
-		self:ApplyAllElements()
-		-- un-hide requests made in combat
 		local hidden = CharDB().hidden
-		for _, e in ipairs(Elements) do
-			if not hidden[e.key] then ApplyElement(e, false) end
-		end
+		for _, e in ipairs(Elements) do ApplyElement(e, hidden[e.key] and true or false) end
 	end
 end

@@ -30,7 +30,7 @@ local GetAccountExpansionLevel = GetAccountExpansionLevel
 local MAX_PLAYER_LEVEL_TABLE = MAX_PLAYER_LEVEL_TABLE
 
 -- Version of the default layout. Bump it to push a new default layout to everybody once.
-local LAYOUT_VERSION = 1
+local LAYOUT_VERSION = 2
 
 -- Bartender bar ids that make up the bottom rows, bottom-most first:
 -- 1 = main bar, 6 = Blizzard "bottom left", 5 = Blizzard "bottom right"
@@ -207,11 +207,20 @@ local function GetBT()
 	if BT and BT.db then return BT end
 end
 
--- LibWindow position: SetPoint(point, UIParent, point, x/scale, y/scale)
--- so x and y are plain UIParent units.
-local function SetBarPosition(bar, point, x, y, scale)
+-- A Bartender bar frame is a 1x1 anchor that sits at the TOPLEFT corner of its
+-- button grid (buttons grow RIGHT and DOWN from it), offset by (5,-3) bar units.
+-- These helpers place the *grid* where we want it.
+--   point        : anchor point on the parent (DiabolicUI frame), e.g. "BOTTOM", "TOPRIGHT"
+--   left, top    : grid top-left corner, relative to that point, in parent units
+--   scale        : bar scale
+local function PlaceGrid(bar, point, left, top, scale)
+	local hoff = bar.hpad_offset or 0
+	local voff = bar.vpad_offset or 0
 	local pos = bar.config.position
-	pos.point, pos.x, pos.y, pos.scale = point, x, y, scale
+	pos.point = point
+	pos.x = left - (BT_MARGIN_LEFT - hoff) * scale
+	pos.y = top + (BT_MARGIN_TOP + voff) * scale
+	pos.scale = scale
 	pos.growVertical, pos.growHorizontal = "DOWN", "RIGHT"
 end
 
@@ -229,6 +238,12 @@ local function ApplyBar(bar)
 	if bar.UpdateButtonLayout then bar:UpdateButtonLayout() end
 end
 
+-- height of the bottom rows block for the current mode
+Module.GetBottomRowsTop = function(self)
+	local rows = self:GetNumBottomRows()
+	return BAR_INSET + rows * BUTTON_PX[rows] + (rows - 1) * BUTTON_PADDING_PX
+end
+
 -- Places bars 1/6/5 as the bottom rows for the current mode, disables the rest of them
 Module.ApplyBottomRows = function(self)
 	local BT = GetBT()
@@ -240,6 +255,7 @@ Module.ApplyBottomRows = function(self)
 	local px = BUTTON_PX[rows]
 	local scale = px / BT_BUTTON
 	local pad = BUTTON_PADDING_PX / scale
+	local width = 12 * px + 11 * BUTTON_PADDING_PX
 
 	for row, id in ipairs(BOTTOM_ROW_BARS) do
 		if row <= rows then
@@ -248,8 +264,8 @@ Module.ApplyBottomRows = function(self)
 			bar.config.rows = 1
 			bar.config.buttons = 12
 			bar.config.padding = pad
-			local y = BAR_INSET + (row - 1) * (px + BUTTON_PADDING_PX) - BT_MARGIN_BOTTOM * scale
-			SetBarPosition(bar, "BOTTOM", 0, y, scale)
+			local top = BAR_INSET + (row - 1) * (px + BUTTON_PADDING_PX) + px
+			PlaceGrid(bar, "BOTTOM", -width / 2, top, scale)
 			ApplyBar(bar)
 		else
 			self:DisableActionBar(AB, id)
@@ -257,19 +273,36 @@ Module.ApplyBottomRows = function(self)
 	end
 	self:UpdateArtwork()
 	self:PositionStanceBar()
+	self:PositionTotemBar()
 end
 
 Module.PositionStanceBar = function(self)
 	local BT = GetBT()
 	local mod = BT and BT:GetModule("StanceBar", true)
 	if not (mod and mod.bar and mod:IsEnabled()) then return end
-	local rows = self:GetNumBottomRows()
-	local px = BUTTON_PX[rows]
-	local top = BAR_INSET + rows * px + (rows - 1) * BUTTON_PADDING_PX
-	local scale = 0.9
-	mod.db.profile.padding = 2
-	SetBarPosition(mod.bar, "BOTTOM", 0, top + 28 - BT_MARGIN_BOTTOM * scale, scale)
+	local n = GetNumShapeshiftForms and GetNumShapeshiftForms() or 0
+	if n < 1 then n = 1 end
+	local scale = 1
+	local pad = 2
+	mod.db.profile.padding = pad
+	mod.db.profile.rows = 1
+	local width = (n * 30 + (n - 1) * pad) * scale
+	PlaceGrid(mod.bar, "BOTTOM", -width / 2, self:GetBottomRowsTop() + 34 + 30 * scale, scale)
 	ApplyBar(mod.bar)
+end
+
+Module.PositionTotemBar = function(self)
+	local BT = GetBT()
+	local totems = BT and BT:GetModule("MultiCast", true)
+	if not (totems and totems.bar and totems:IsEnabled()) then return end
+	-- 1x1 anchor, the Blizzard totem frame (230x40) hangs from its TOPLEFT (+3,+1)
+	local rows = self:GetNumBottomRows()
+	local left = -(12 * BUTTON_PX[rows] + 11 * BUTTON_PADDING_PX) / 2
+	local top = self:GetBottomRowsTop() + 34 + 40
+	local pos = totems.bar.config.position
+	pos.point, pos.x, pos.y, pos.scale = "BOTTOM", left - 3, top - 1, 1
+	pos.growVertical, pos.growHorizontal = "DOWN", "RIGHT"
+	ApplyBar(totems.bar)
 end
 
 -- Full default layout (all bars). Used on first run and from the options menu.
@@ -284,7 +317,6 @@ Module.ApplyDefaultLayout = function(self)
 	local AB = BT:GetModule("ActionBars", true)
 	if not AB or not AB.actionbars then return end
 
-	-- global button settings
 	local p = BT.db.profile
 	p.outofrange = "button"
 	p.snapping = true
@@ -293,59 +325,54 @@ Module.ApplyDefaultLayout = function(self)
 
 	-- bar 2 is page 2 of the main bar (not shown by the default UI either)
 	self:DisableActionBar(AB, 2)
+	for id = 7, 10 do self:DisableActionBar(AB, id) end
 
-	-- bottom rows (1/6/5)
+	-- bottom rows (1/6/5), stance and totem bars above them
 	self:ApplyBottomRows()
 
-	-- right side bars: 3 (Blizzard right) and 4 (Blizzard right 2), vertical, 36px
+	-- right side bars: 3 and 4, vertical columns at the right screen edge
 	local sidePad = 2
-	local colW = BT_BUTTON + sidePad
-	local sideTop = -326 + BT_MARGIN_TOP
+	local right = -20
 	for idx, id in ipairs({ 3, 4 }) do
 		AB:EnableBar(id)
 		local bar = AB.actionbars[id]
 		bar.config.rows = 12
 		bar.config.buttons = 12
 		bar.config.padding = sidePad
-		-- TOPRIGHT of the bar frame = 5px right of the buttons' right edge
-		local x = -20 - (idx - 1) * colW + BT_MARGIN_LEFT
-		SetBarPosition(bar, "TOPRIGHT", x, sideTop, 1)
+		local left = right - idx * BT_BUTTON - (idx - 1) * sidePad
+		PlaceGrid(bar, "TOPRIGHT", left, -326, 1)
 		ApplyBar(bar)
 	end
 
-	-- extra stance pages are handled by bar 1 paging, keep 7-10 off
-	for id = 7, 10 do self:DisableActionBar(AB, id) end
-
-	-- pet bar: vertical column left of the side bars (same place as the old DiabolicUI pet bar)
+	-- pet bar: column left of the side bars
 	local pet = BT:GetModule("PetBar", true)
-	if pet and pet.bar then
-		pet.db.profile.rows = 10
-		pet.db.profile.padding = 2
-		SetBarPosition(pet.bar, "TOPRIGHT", -20 - 2 * colW - 2 + BT_MARGIN_LEFT, sideTop, 1)
-		ApplyBar(pet.bar)
+	if pet then
+		pet.db.profile.enabled = true
+		if not pet:IsEnabled() then pet:Enable() end
+		if pet.bar then
+			pet.db.profile.rows = 10
+			pet.db.profile.padding = 2
+			local left = right - 2 * BT_BUTTON - sidePad - 6 - 30
+			PlaceGrid(pet.bar, "TOPRIGHT", left, -326, 1)
+			ApplyBar(pet.bar)
+		end
 	end
 
-	-- stance bar above the bottom rows
-	self:PositionStanceBar()
-
-	-- shaman totem bar: left of the stance bar
-	local totems = BT:GetModule("MultiCast", true)
-	if totems and totems.bar then
-		local rows = self:GetNumBottomRows()
-		local top = BAR_INSET + rows * BUTTON_PX[rows] + (rows - 1) * BUTTON_PADDING_PX
-		SetBarPosition(totems.bar, "BOTTOM", -220, top + 28, 1)
-		ApplyBar(totems.bar)
-	end
-
-	-- micro menu: bottom right, like the default UI. Includes the shop and transmog buttons.
+	-- micro menu: bottom right corner, like the default UI (Shop and Transmog included)
 	local micro = BT:GetModule("MicroMenu", true)
+	local microTop = 0
 	if micro then
 		micro.db.profile.enabled = true
 		if not micro:IsEnabled() then micro:Enable() end
 		if micro.bar then
+			local m = 1
+			local n = micro.bar.buttons and #micro.bar.buttons or 12
 			micro.db.profile.padding = -3
 			micro.db.profile.rows = 1
-			SetBarPosition(micro.bar, "BOTTOMRIGHT", -8, 2, 0.75)
+			local width = (n * (28 - 3) + 3) * m
+			-- micro buttons are 58 tall with ~21 transparent px on top
+			microTop = 58 * m
+			PlaceGrid(micro.bar, "BOTTOMRIGHT", -8 - width, microTop - 2, m)
 			ApplyBar(micro.bar)
 		end
 	end
@@ -356,14 +383,17 @@ Module.ApplyDefaultLayout = function(self)
 		bags.db.profile.enabled = true
 		if not bags:IsEnabled() then bags:Enable() end
 		if bags.bar then
-			bags.db.profile.padding = 0
+			local b = 1
+			local n = bags.bar.buttons and #bags.bar.buttons or 5
+			bags.db.profile.padding = 2
 			bags.db.profile.rows = 1
-			SetBarPosition(bags.bar, "BOTTOMRIGHT", -8, 46, 0.8)
+			local width = (n * 32 - 2) * b
+			PlaceGrid(bags.bar, "BOTTOMRIGHT", -10 - width, microTop - 18 + 4 + 30 * b, b)
 			ApplyBar(bags.bar)
 		end
 	end
 
-	-- XP/Rep: DiabolicUI has its own XP bar (and the Diablo-WoW paragon bar), turn off Bartender's
+	-- XP/Rep: DiabolicUI has its own XP bar (and the Diablo-WoW paragon bar)
 	for _, name in ipairs({ "XPBar", "RepBar" }) do
 		local m = BT:GetModule(name, true)
 		if m and m.db and m.db.profile.enabled then
@@ -373,7 +403,7 @@ Module.ApplyDefaultLayout = function(self)
 
 	p.diabolicLayout = LAYOUT_VERSION
 	self:RaiseBars()
-	print("|cff8a0707Diabolic|r|cffffffffUI|r: стандартная раскладка панелей применена. /dui — настройки.")
+	print("|cff8a0707Diabolic|r|cffffffffUI|r: раскладка панелей по умолчанию применена. Настройки: /dui")
 end
 
 -- Micro menu and bags sit on top of the angel artwork, so keep them above it
@@ -480,13 +510,31 @@ Module.OnEnable = function(self, event, ...)
 		self:RegisterEvent(e, "UpdateArtwork")
 	end
 	self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
+	self:WaitForBars()
 end
 
 Module.OnEnteringWorld = function(self)
 	self:UnregisterEvent("PLAYER_ENTERING_WORLD", "OnEnteringWorld")
-	self:AdoptParagonBar()
-	self:OnBarsReady()
 	self:RegisterEvent("PLAYER_ENTERING_WORLD", "UpdateArtwork")
+end
+
+-- On 3.3.5 the DiabolicUI engine may start after PLAYER_ENTERING_WORLD, so wait
+-- actively until the player is in the world and the embedded bars exist.
+Module.WaitForBars = function(self)
+	local waiter = CreateFrame("Frame")
+	local elapsed = 0
+	waiter:SetScript("OnUpdate", function(f, e)
+		elapsed = elapsed + e
+		if elapsed < .25 then return end
+		elapsed = 0
+		local BT = GetBT()
+		local AB = BT and BT:GetModule("ActionBars", true)
+		if IsLoggedIn() and AB and AB.actionbars and AB.actionbars[1] then
+			f:SetScript("OnUpdate", nil)
+			self:AdoptParagonBar()
+			self:OnBarsReady()
+		end
+	end)
 end
 
 -- slash helpers used by the options module

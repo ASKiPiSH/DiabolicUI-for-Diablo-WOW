@@ -1361,14 +1361,25 @@ Engine.UpdateScale = function(self)
 	-- resize our UIParent clone
 	-- 	*if the player has a triple monitor EyeFinity setup, 
 	-- 	 our frame will thus be locked to the center monitor. 
+	-- Diablo-WoW: DiabolicUI has its own scale, independent of the Blizzard UI scale.
+	-- At 100% one DiabolicUI unit is one screen pixel (the size the UI was drawn for),
+	-- whatever "UI Scale" is set in the video options. Size slider: /dui > Интерфейс.
+	local opts = _G.DiabolicUI_OptionsDB
+	local user = opts and tonumber(opts.uiScale) or 1
+	if user < .5 then user = .5 elseif user > 2 then user = 2 end
+	local scale = (768 / screen_height) * user / UIParent:GetEffectiveScale()
+	local width_ratio = virtual_width and (virtual_width / screen_width) or 1
 	if virtual_width then
-		-- UICenter is parent to a lot of secure frames, and thus it will become secure itself.
-		-- So we need to wrap these calls in our out-of-combat handler, to avoid taint!
-		self:Wrap(function() UICenter:SetSize(virtual_width, screen_height) end)()
 		screen_width = virtual_width
-	else
-		self:Wrap(function() UICenter:SetSize(UIParent:GetSize()) end)()
 	end
+	-- UICenter is parent to a lot of secure frames, and thus it will become secure itself.
+	-- So we need to wrap these calls in our out-of-combat handler, to avoid taint!
+	self:Wrap(function()
+		UICenter:SetScale(scale)
+		UICenter:SetSize(UIParent:GetWidth() * width_ratio / scale, UIParent:GetHeight() / scale)
+		UICenter:ClearAllPoints()
+		UICenter:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	end)()
 
 	-- Diablo-WoW: the UI no longer touches the uiScale/useUiScale CVars by itself.
 	-- The old code forced uiScale = 768/screen_height on every UI_SCALE_CHANGED and

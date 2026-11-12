@@ -4,7 +4,7 @@
 ## Notes: Diablo-style UI for Diablo-WoW. Action bars powered by Bartender4.|n|cff666666DiabolicUI by Lars Norberg, Bartender4 by Nevcairiel.|r
 ## Notes-ruRU: Интерфейс в стиле Diablo для Diablo-WoW. Панели команд на базе Bartender4.|n|cff666666DiabolicUI — Lars Norberg, Bartender4 — Nevcairiel.|r
 ## Author: Lars Norberg, Nevcairiel, Diablo-WoW team
-## Version: 2.0.0-diablowow
+## Version: 2.1.0-diablowow
 ## DefaultState: Enabled
 ## SavedVariables: DiabolicUI_DB, DiabolicBarsDB, DiabolicUI_OptionsDB, DiabolicUI_ErrorLog
 ## SavedVariablesPerCharacter: DiabolicUI_CharDB

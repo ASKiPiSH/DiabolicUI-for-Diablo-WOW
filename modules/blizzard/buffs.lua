@@ -159,6 +159,13 @@ Module.OnEnable = function(self)
 	local UICenter = Engine:GetFrame()
 	local point, x, y = unpack(config.structure.buffs.position)
 
+	-- Diablo-WoW: a holder the buffs hang from, movable through the DiabolicUI movers
+	local holder = CreateFrame("Frame", "DiabolicUIBuffHolder", UICenter)
+	holder:SetSize(300, 100)
+	holder:SetPoint(point, UICenter, point, x, y)
+	self.Holder = holder
+	UICenter, point, x, y = holder, "TOPRIGHT", 0, 0
+
 	-- this is most likely overwritten by Blizzard later
 	local buffs = BuffFrame
 	buffs:ClearAllPoints()

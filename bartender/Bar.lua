@@ -33,7 +33,10 @@ local defaults = {
 
 local Sticky = LibStub("LibSimpleSticky-1.0")
 local LibWin = LibStub("LibWindow-1.1")
-local snapBars = { WorldFrame, UIParent }
+-- DiabolicUI: bars live in the DiabolicUI frame, which has its own scale
+local _, Engine = ...
+local BarParent = (Engine and Engine.GetFrame and Engine:GetFrame()) or UIParent
+local snapBars = { WorldFrame, BarParent }
 
 local barOnEnter, barOnLeave, barOnDragStart, barOnDragStop, barOnClick, barOnUpdateFunc, barOnAttributeChanged
 do
@@ -51,7 +54,7 @@ do
 		local x,y,anchor = nil, nil, self:GetAnchor()
 		x = (self.config.position.growHorizontal == "RIGHT") and self:GetLeft() or self:GetRight()
 		y = (self.config.position.growVertical == "DOWN") and self:GetTop() or self:GetBottom()
-		self:ClearSetPoint(anchor, UIParent, "BOTTOMLEFT", x, y)
+		self:ClearSetPoint(anchor, self:GetParent(), "BOTTOMLEFT", x, y)
 		self:SetWidth(self.overlay:GetWidth())
 		self:SetHeight(self.overlay:GetHeight())
 	end
@@ -60,7 +63,7 @@ do
 		local x,y,anchor = nil, nil, self:GetAnchor()
 		x = (self.config.position.growHorizontal == "RIGHT") and self:GetLeft() or self:GetRight()
 		y = (self.config.position.growVertical == "DOWN") and self:GetTop() or self:GetBottom()
-		self:ClearSetPoint(anchor, UIParent, "BOTTOMLEFT", x, y)
+		self:ClearSetPoint(anchor, self:GetParent(), "BOTTOMLEFT", x, y)
 		self:SetWidth(1)
 		self:SetHeight(1)
 	end
@@ -130,7 +133,7 @@ function DiabolicBars.Bar:Create(id, config, name)
 	id = tostring(id)
 	assert(not barregistry[id], "duplicated entry in barregistry.")
 
-	local bar = setmetatable(CreateFrame("Frame", ("DBTBar%s"):format(id), UIParent, "SecureHandlerStateTemplate"), Bar_MT)
+	local bar = setmetatable(CreateFrame("Frame", ("DBTBar%s"):format(id), BarParent, "SecureHandlerStateTemplate"), Bar_MT)
 	barregistry[id] = bar
 
 	bar.id = id
@@ -248,7 +251,7 @@ function Bar:UpgradeConfig()
 			local point, relPoint = pos.point, pos.relPoint
 			if x and y and point and relPoint then
 				x, y = x/s, y/s
-				self:ClearSetPoint(point, UIParent, relPoint, x, y)
+				self:ClearSetPoint(point, self:GetParent(), relPoint, x, y)
 				self:SavePosition()
 				pos.relPoint = nil
 			end
@@ -298,7 +301,7 @@ function Bar:SetSize(width, height)
 		self:SetWidth(width)
 		self:SetHeight(height or width)
 		local x, y = self:GetLeft(), self:GetTop()
-		self:ClearSetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+		self:ClearSetPoint("TOPLEFT", self:GetParent(), "BOTTOMLEFT", x, y)
 		self:SetWidth(1)
 		self:SetHeight(1)
 		self:SavePosition()

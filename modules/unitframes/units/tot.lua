@@ -84,6 +84,35 @@ local Style = function(self, unit)
 	CastBar:DisableSmoothing(true)
 
 
+	-- Portrait (Diablo-WoW): same frame as the focus/pet portraits, smaller
+	-------------------------------------------------------------------
+	local pconfig = Module:GetStaticConfig("UnitFrames").visuals.units.focus.portrait
+	local PSIZE = 44
+	local ratio = PSIZE / pconfig.size[1]
+	local PortraitHolder = CreateFrame("Frame", nil, self)
+	PortraitHolder:SetSize(PSIZE, PSIZE)
+	PortraitHolder:SetPoint("RIGHT", self, "LEFT", 6, -4)
+
+	local PortraitBackdrop = PortraitHolder:CreateTexture(nil, "BACKGROUND")
+	PortraitBackdrop:SetSize(pconfig.texture_size[1] * ratio, pconfig.texture_size[2] * ratio)
+	PortraitBackdrop:SetPoint("CENTER")
+	PortraitBackdrop:SetTexture(pconfig.textures.backdrop)
+
+	local Portrait = CreateFrame("PlayerModel", nil, PortraitHolder)
+	Portrait:SetFrameLevel(self:GetFrameLevel() + 1)
+	Portrait:SetAllPoints()
+
+	local PortraitBorder = CreateFrame("Frame", nil, PortraitHolder)
+	PortraitBorder:SetFrameLevel(self:GetFrameLevel() + 2)
+	PortraitBorder:SetAllPoints()
+
+	local PortraitBorderNormal = PortraitBorder:CreateTexture(nil, "ARTWORK")
+	PortraitBorderNormal:SetSize(pconfig.texture_size[1] * ratio, pconfig.texture_size[2] * ratio)
+	PortraitBorderNormal:SetPoint("CENTER")
+	PortraitBorderNormal:SetTexture(pconfig.textures.border)
+
+	self.Portrait = Portrait
+
 	-- Texts
 	-------------------------------------------------------------------
 	local Name = Border:CreateFontString(nil, "OVERLAY")

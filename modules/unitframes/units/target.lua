@@ -275,19 +275,10 @@ local Style = function(self, unit)
 	Health.Value:SetFontObject(config.texts.health.font_object)
 	Health.Value:SetPoint(unpack(config.texts.health.position))
 	Health.Value:SetTextColor(unpack(config.texts.health.color))
-	Health.Value.showPercent = true
+	-- Diablo-WoW: always show "current / max", not only in combat
+	Health.Value.showPercent = false
 	Health.Value.showDeficit = false
-	Health.Value.showMaximum = false
-
-	Health.PostUpdate = function(self)
-		local min, max = self:GetMinMaxValues()
-		local value = self:GetValue()
-		if UnitAffectingCombat("player") then
-			self.Value:Show()
-		else
-			self.Value:Hide()
-		end
-	end
+	Health.Value.showMaximum = true
 	
 	
 	-- Power
@@ -297,6 +288,15 @@ local Style = function(self, unit)
 	Power:SetPoint(unpack(config.power.position))
 	Power:SetStatusBarTexture(config.power.texture)
 	Power.frequent = 1/120
+
+	-- Diablo-WoW: mana/rage/energy value on the power bar
+	Power.Value = HealthValueHolder:CreateFontString(nil, "OVERLAY")
+	Power.Value:SetFontObject(config.texts.power.font_object)
+	Power.Value:SetPoint("RIGHT", Power:GetScaffold(), "RIGHT", -6, 0)
+	Power.Value:SetTextColor(unpack(config.texts.power.color))
+	Power.Value.showPercent = false
+	Power.Value.showDeficit = false
+	Power.Value.showMaximum = true
 	
 
 	-- ComboPoints

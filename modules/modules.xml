@@ -7,5 +7,6 @@
 <Include file='nameplates\nameplates.xml'/>
 <Include file='objectives\objectives.xml'/>
 <Include file='unitframes\unitframes.xml'/>
+<Include file='movers\movers.xml'/>
 
 </Ui>

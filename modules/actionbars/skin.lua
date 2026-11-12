@@ -62,8 +62,10 @@ local function SetupButton(button)
 	s.macro = button.macroName or (name and _G[name .. "Name"])
 	s.autocast = name and _G[name .. "AutoCastable"]
 
-	-- slot backdrop behind the icon
+	-- slot backdrop behind the icon. The template icon is also on BACKGROUND, so it
+	-- is moved up to BORDER, otherwise the slot texture covers the spell icon.
 	s.slot = button:CreateTexture(nil, "BACKGROUND")
+	if s.icon and s.icon.SetDrawLayer then s.icon:SetDrawLayer("BORDER") end
 
 	-- border lives in a child frame so it is drawn above the icon and cooldown
 	s.frame = CreateFrame("Frame", nil, button)

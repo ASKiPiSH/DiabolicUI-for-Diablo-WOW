@@ -141,6 +141,7 @@ Module.StyleWatchFrame = function(self)
 	WatchFrameHolder:SetPoint("TOP", UICenter, "TOP", 0, -326) -- to avoid depending on the minimap
 	WatchFrameHolder:SetPoint("BOTTOM", UICenter, "BOTTOM", 0, 160 + 60)
 	WatchFrameHolder:SetPoint("RIGHT", Pet, "LEFT", -30, 0)
+	self.Holder = WatchFrameHolder -- Diablo-WoW: movable through the DiabolicUI movers
 
 	WatchFrame:ClearAllPoints()
 	WatchFrame:SetPoint("TOP", WatchFrameHolder, "TOP")

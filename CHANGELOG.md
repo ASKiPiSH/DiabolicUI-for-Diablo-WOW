@@ -1,5 +1,32 @@
 # DiabolicUI for Diablo-WoW — журнал изменений / changelog
 
+## 2.1.0-diablowow — 2026-11-12 (по итогам первого теста)
+
+### Русский
+- **Перевод**: полная русская локализация DiabolicUI (раньше `locale-ruRU.lua` был пустым, окно «Настройка чата» и др. были на английском). Заголовки окна панелей — «DiabolicUI».
+- **Размер интерфейса**: у DiabolicUI свой масштаб, не зависящий от «Масштаба интерфейса» в настройках видео. При 100% элементы такого размера, под который нарисованы текстуры. Ползунок «Размер интерфейса DiabolicUI» в `/dui → Интерфейс`. Панели Bartender масштабируются вместе с DiabolicUI.
+- **Панели**: исправлена раскладка. Кадр панели Bartender — это точка 1×1 в левом верхнем углу кнопок, а не прямоугольник вокруг них, поэтому панели, меню и сумки уезжали за экран. Раскладка при первом входе теперь применяется надёжно: на 3.3.5 ядро DiabolicUI стартует позже входа в мир.
+- **Иконки способностей** снова видны: текстура слота перекрывала иконку (общий слой BACKGROUND).
+- **Меню и сумки** — в правом нижнем углу, внутри экрана.
+- **Миникарта**: под ней ряд кнопок (отслеживание, календарь, почта, поиск группы, поле боя и кнопки аддонов/сервера).
+- **Перемещение**: миникарта, задачи, полоса заклинаний, баффы, цель, цель цели и фокус перетаскиваются вместе с панелями («Перемещение элементов» или `/dui lock`; правый клик по рамке — вернуть на место). Размер каждого — в `/dui → Элементы`.
+- **Полоски над головой**: меньше (настраивается), имя целиком, здоровье числом, мана цели, ваши дебаффы. Полоски над союзниками и игроками. Цель над моделью для всех, кроме боссов, элит и редких — они остаются сверху. Если цель — вы сами, верхний фрейм тоже показывается.
+- **Фрейм цели**: здоровье и мана числом всегда, а не только в бою. У «цели цели» появился портрет в рамке.
+- **Исправлена ошибка** `UnitIsTapDenied` (функция из Legion) на полосках здоровья и ресурса.
+- **Настройки**: одно окно. Сначала идут настройки Bartender («Панели»), затем разделы DiabolicUI: «Интерфейс», «Элементы», «Полоски над головой», «Журнал ошибок». `/dui` открывает его на разделе «Панели».
+
+### English
+- Full Russian localization; options window titled "DiabolicUI".
+- DiabolicUI has its own scale independent of the Blizzard UI scale (slider in `/dui`); Bartender bars are parented to the DiabolicUI frame and scale with it.
+- Fixed bar layout (a Bartender bar frame is a 1x1 anchor at the grid's top-left), reliable first-login layout, micro menu and bags kept on screen.
+- Action icons visible again (slot texture was covering them).
+- Minimap button row (tracking, calendar, mail, LFG, battleground, addon/server buttons).
+- Movers for minimap, tracker, cast bar, buffs, target, ToT, focus, unlocked together with the bars; per-element size sliders.
+- Nameplates: smaller/adjustable, full name, health text, target power, friendly plates; top target frame only for bosses/elites/rares and self.
+- Target health/power values always shown; ToT portrait frame.
+- Fixed Legion-only `UnitIsTapDenied` call.
+- Single options window: Bartender pages first, then DiabolicUI pages.
+
 ## 2.0.0-diablowow — 2026-11-12
 
 ### Русский

@@ -300,7 +300,7 @@ function DiabolicBars:ShowUnlockDialog()
 		local title = f:CreateFontString('ARTWORK')
 		title:SetFontObject('GameFontNormal')
 		title:SetPoint('TOP', header, 'TOP', 0, -14)
-		title:SetText(L["DiabolicBars"])
+		title:SetText("|cff8a0707Diabolic|r|cffffffffUI|r")
 
 		local desc = f:CreateFontString('ARTWORK')
 		desc:SetFontObject('GameFontHighlight')
@@ -408,7 +408,7 @@ function createLDBLauncher()
 
 	local LDBObj = LibStub("LibDataBroker-1.1"):NewDataObject("DiabolicBars", {
 		type = "launcher",
-		label = "DiabolicBars",
+		label = "DiabolicUI",
 		OnClick = function(_, msg)
 			if msg == "LeftButton" then
 				if DiabolicBars.Locked then
@@ -427,7 +427,7 @@ function createLDBLauncher()
 		icon = "Interface\\Icons\\INV_Drink_05",
 		OnTooltipShow = function(tooltip)
 			if not tooltip or not tooltip.AddLine then return end
-			tooltip:AddLine("DiabolicBars")
+			tooltip:AddLine("DiabolicUI")
 			tooltip:AddLine(L_BT_LEFT)
 			tooltip:AddLine(L_BT_RIGHT)
 		end,

@@ -24,7 +24,7 @@ local function getOptions()
 	if not DiabolicBars.options then
 		DiabolicBars.options = {
 			type = "group",
-			name = "DiabolicBars",
+			name = "|cff8a0707Diabolic|r|cffffffffUI|r",
 			icon = "Interface\\Icons\\INV_Drink_05",
 			childGroups = "tree",
 			plugins = {},
@@ -237,6 +237,10 @@ local function getOptions()
 			if v.SetupOptions then
 				v:SetupOptions()
 			end
+		end
+		-- DiabolicUI: add the rest of the interface settings to this window
+		if DiabolicBars.OnOptionsCreated then
+			DiabolicBars:OnOptionsCreated(DiabolicBars.options)
 		end
 	end
 	return DiabolicBars.options

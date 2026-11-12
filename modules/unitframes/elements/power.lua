@@ -1,5 +1,9 @@
 local _, Engine = ...
 local Handler = Engine:GetHandler("UnitFrame")
+-- 3.3.5 has no UnitIsTapDenied (added in Legion)
+local UnitIsTapDenied = UnitIsTapDenied or function(unit)
+	return UnitIsTapped(unit) and not UnitIsTappedByPlayer(unit) and not (UnitIsTappedByAllThreatList and UnitIsTappedByAllThreatList(unit))
+end
 
 -- Lua API
 local tostring, tonumber = tostring, tonumber
@@ -11,7 +15,6 @@ local UnitIsConnected = UnitIsConnected
 local UnitIsDead = UnitIsDead
 local UnitIsFriend = UnitIsFriend
 local UnitIsGhost = UnitIsGhost
-local UnitIsTapDenied = UnitIsTapDenied -- new in Legion
 local UnitIsTapped = UnitIsTapped -- removed in Legion
 local UnitIsTappedByAllThreatList = UnitIsTappedByAllThreatList -- removed in Legion
 local UnitIsTappedByPlayer = UnitIsTappedByPlayer -- removed in Legion
